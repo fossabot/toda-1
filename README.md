@@ -1,11 +1,12 @@
 <!-- vi: ft=markdown tw=80 ts=2 sw=2 sts=2 fdm=expr et: -->
 
-# Symfest
+# Toda
 
-Symfest gives you the power to safely deploy files using symlinks on any
+Toda ([תודה](https://en.wiktionary.org/wiki/%D7%AA%D7%95%D7%93%D7%94)) gives you
+the power to safely deploy files using symlinks on any
 operating system with Python installed.
 
-Symfest requires only core Python, supporting versions 3.4+ and 2.7 in that order.
+Toda requires only core Python, supporting versions 3.4+ and 2.7 in that order.
 
 Multi-platform support for POSIX-compliant systems, Debian GNU/Linux, Windows,
   macOS and BSDs in that order of priority.
@@ -13,9 +14,9 @@ Multi-platform support for POSIX-compliant systems, Debian GNU/Linux, Windows,
 It requires admin on Windows, because symlinking is
 a privileged operation on Windows.
 
-## `manifest.py`
+## `toda`
 ```
-usage: manifest.py [-h] [-n] [-m MANIFEST] [-f] [-v]
+usage: toda [-h] [-n] [-m MANIFEST] [-f] [-v]
                    [{install,purge,inspect}] [section [section ...]]
 
 creates symlinks described by a manifest
