@@ -6,13 +6,12 @@ Toda ([תודה](https://en.wiktionary.org/wiki/%D7%AA%D7%95%D7%93%D7%94)) gives
 the power to safely deploy files using symlinks on any
 operating system with Python installed.
 
-Toda requires only core Python, supporting versions 3.4+ and 2.7 in that order.
+Toda requires only core Python, supporting versions 3.4+ and 2.7. Toda has
+multi-platform support for POSIX-compliant systems, Linux (Debian, Ubuntu, etc),
+Windows, macOS and BSDs in that order of priority.
 
-Multi-platform support for POSIX-compliant systems, Debian GNU/Linux, Windows,
-  macOS and BSDs in that order of priority.
-
-It requires admin on Windows, because symlinking is
-a privileged operation on Windows.
+On Windows, creating symlinks requires either Developer Mode or administrator
+rights.
 
 ## `toda`
 ```
