@@ -62,13 +62,13 @@ class Actions:
 
     def install(self):
         for section in self.args.section:
-            for (dest, src) in self.manifest.iter_section(section):
-                log.debug("installing {s}".format(dest))
+            for dest, src in self.manifest.iter_section(section):
+                log.debug("installing {:s}".format(dest))
                 _deploy_one(dest, src, force=self.args.force)
 
     def purge(self):
         for section in self.args.section:
-            for (dest, _) in self.manifest.iter_section(section):
+            for dest, _ in self.manifest.iter_section(section):
                 if lexists(dest) or exists(dest):
                     log.warning("purged %s" % dest)
                     remove(dest)

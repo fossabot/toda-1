@@ -6,10 +6,12 @@ import logging
 
 from .model import Manifest
 from .controller import Actions
+import toda.controller as controller
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.WARN)
 log.addHandler(logging.StreamHandler())
+
 
 def main():
     startdir = os.getcwd()
@@ -61,12 +63,12 @@ def main():
         from .nop import nop
 
         args.verbose = 3
-        log.warn("seting up dry run")
-        rmtree = nop(rmtree)
-        remove = nop(remove)
-        makedirs = nop(makedirs)
-        symlink = nop(symlink)
-        chdir = nop(chdir)
+        log.warning("setting up dry run")
+        controller.rmtree = nop(controller.rmtree)
+        controller.remove = nop(controller.remove)
+        controller.makedirs = nop(controller.makedirs)
+        controller.symlink = nop(controller.symlink)
+        controller.chdir = nop(controller.chdir)
 
     if args.dir:
         os.environ["HOME"] = os.environ["USERPROFILE"] = args.dir
@@ -76,7 +78,7 @@ def main():
     elif args.verbose >= 1:
         log.setLevel(logging.INFO)
 
-    m = Manifest(path=args.manifest)
+    m = Manifest(path=args.manifest, startdir=startdir)
     if not args.section:
         args.section = ("default",)
     else:

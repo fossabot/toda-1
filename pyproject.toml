@@ -1,10 +1,89 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "toda"
+version = "0.0.1"
+description = "Toda gives you the power to safely deploy files using symlinks on any operating system with Python installed."
+readme = "README.md"
+license = {text = "MPL-2.0"}
+authors = [
+    {name = "hgto", email = "77352283+hgto@users.noreply.github.com"}
+]
+keywords = ["dotfiles", "symlink", "environment"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: BSD",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Unix",
+    "Operating System :: MacOS",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
+    "Intended Audience :: System Administrators",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
+requires-python = ">=3.8"
+
+[project.urls]
+Homepage = "https://github.com/hgto/toda"
+Repository = "https://github.com/hgto/toda"
+Issues = "https://github.com/hgto/toda/issues"
+
+[project.scripts]
+toda = "toda.__main__:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["toda*"]
+
 [tool.black]
-target-version = ['py34','py38','py27']
-include = '\.py'
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
 exclude = '''
-\(
-  [.]git
-| [.]venv
-| [.]tox
-\)
+/(
+    \.git
+  | \.venv
+  | \.tox
+  | build
+  | dist
+)/
 '''
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["toda"]
+branch = true
+omit = ["tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+show_missing = true

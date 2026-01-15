@@ -2,11 +2,14 @@
 
 # Toda
 
+[![CI](https://github.com/hgto/toda/actions/workflows/ci.yml/badge.svg)](https://github.com/hgto/toda/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/hgto/toda/branch/main/graph/badge.svg)](https://codecov.io/gh/hgto/toda)
+
 Toda ([תודה](https://en.wiktionary.org/wiki/%D7%AA%D7%95%D7%93%D7%94)) gives you
 the power to safely deploy files using symlinks on any
 operating system with Python installed.
 
-Toda requires only core Python, supporting versions 3.4+ and 2.7. Toda has
+Toda requires only core Python, supporting versions 3.8+. Toda has
 multi-platform support for POSIX-compliant systems, Linux (Debian, Ubuntu, etc),
 Windows, macOS and BSDs in that order of priority.
 

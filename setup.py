@@ -16,7 +16,7 @@ setup(
     keywords=["dotfiles", "symlink", "environment"],
     license="MPL 2.0",
     classifiers=[
-        'Development Status :: 4 - Beta',
+        "Development Status :: 4 - Beta",
         # "Development Status :: 5 - Production/Stable",
         "Programming Language :: Python :: 2.7",
         "Programming Language :: Python :: 3",

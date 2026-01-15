@@ -17,7 +17,6 @@ if PY3:
     def iteritems(obj):
         return obj.items()
 
-
 else:
     if is_windows:
         raise EnvironmentError("python 3 required on windows")

@@ -17,12 +17,12 @@ class Manifest(dict):
     INCLUDE_MACRO = "@include"
     SRC_MACROS = {DELETE_MACRO}
     DEST_MACROS = {INCLUDE_MACRO}
-    INIT_KWARGS = {"path", "force", "startdir"}
+    INIT_KWARGS = {"path", "startdir"}
 
     def __init__(self, **kw):
         for key in kw.keys():
             if key not in self.INIT_KWARGS:
-                raise ValueError("{s} is an invalid keyword-argument".format(key))
+                raise ValueError("{:s} is an invalid keyword-argument".format(key))
         path = kw.get("path")
         self._startdir = kw.get("startdir")
         if not self._startdir:
@@ -63,7 +63,7 @@ class Manifest(dict):
 
     def _parse(self, fp):
         section = None
-        for (i, line) in enumerate(fp, 1):
+        for i, line in enumerate(fp, 1):
             line = line.strip()
             if self._parse_line_comment(line):
                 continue
@@ -82,12 +82,14 @@ class Manifest(dict):
                     "section declaration".format(i)
                 )
 
-            paths = line.split(":", 2)
+            paths = line.split(":", 1)
+            if len(paths) != 2:
+                raise IllegalSyntax("line {:d}: missing colon separator".format(i))
             unparsed_separators = paths[-1].find(":") > -1
             if unparsed_separators:
                 raise IllegalSyntax("line {:d}: multiple colons".format(i))
 
-            dest, src = paths = map(lambda p: p.strip(), paths)
+            dest, src = paths = list(map(lambda p: p.strip(), paths))
             dest_is_macro = self._parse_part_macro(dest)
             src_is_macro = self._parse_part_macro(src)
 
@@ -120,7 +122,7 @@ class Manifest(dict):
         if not included:
             included = set()
         included.add(section_name)
-        for (dest, src) in iteritems(self[section_name]):
+        for dest, src in iteritems(self[section_name]):
             if not self._is_macro_or_parsed(src):
                 src = normpath(join(self._startdir, expanduser(src)))
             if not self._is_macro_or_parsed(dest):
