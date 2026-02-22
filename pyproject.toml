@@ -1,21 +1,18 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=69", "setuptools_scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "toda"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Toda gives you the power to safely deploy files using symlinks on any operating system with Python installed."
 readme = "README.md"
-license = {text = "MPL-2.0"}
-authors = [
-    {name = "hgto", email = "77352283+hgto@users.noreply.github.com"}
-]
+license = { text = "MPL-2.0" }
+authors = [{ name = "hgto", email = "77352283+hgto@users.noreply.github.com" }]
 keywords = ["dotfiles", "symlink", "environment"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -33,7 +30,7 @@ classifiers = [
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 [project.urls]
 Homepage = "https://github.com/hgto/toda"
@@ -45,16 +42,24 @@ toda = "toda.__main__:main"
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-    "black>=23.0",
+    "black>=24.10",
+    "build>=1.2",
+    "mypy>=1.11",
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "ruff>=0.8",
+    "twine>=5.1",
 ]
 
 [tool.setuptools.packages.find]
 include = ["toda*"]
 
+[tool.setuptools_scm]
+fallback_version = "0.0.1"
+local_scheme = "no-local-version"
+
 [tool.black]
-target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
+target-version = ["py310", "py311", "py312", "py313"]
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -65,6 +70,20 @@ exclude = '''
   | dist
 )/
 '''
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["F"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,8 +1,6 @@
 """Tests for toda CLI argument parsing."""
 
 import os
-import sys
-import tempfile
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -19,7 +17,7 @@ class TestCLIArgumentParsing:
         with open(manifest_path, "w") as f:
             f.write("$default\n")
 
-        with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
             mock_args = MagicMock()
             mock_args.action = "inspect"
             mock_args.dry_run = False
@@ -47,7 +45,7 @@ class TestCLIArgumentParsing:
         with open(manifest_path, "w") as f:
             f.write("$default\n")
 
-        with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
             mock_args = MagicMock()
             mock_args.action = "install"
             mock_args.dry_run = False
@@ -75,7 +73,7 @@ class TestCLIArgumentParsing:
         with open(manifest_path, "w") as f:
             f.write("$default\n")
 
-        with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
             mock_args = MagicMock()
             mock_args.action = "purge"
             mock_args.dry_run = False
@@ -95,6 +93,92 @@ class TestCLIArgumentParsing:
 
                 mock_actions_instance.purge.assert_called_once()
 
+    def test_trace_action(self, temp_dir):
+        """Trace action calls trace method."""
+        from toda.__main__ import main
+
+        manifest_path = os.path.join(temp_dir, "MANIFEST")
+        with open(manifest_path, "w") as f:
+            f.write("$default\n")
+
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
+            mock_args = MagicMock()
+            mock_args.action = "trace"
+            mock_args.dry_run = False
+            mock_args.manifest = manifest_path
+            mock_args.force = False
+            mock_args.verbose = 0
+            mock_args.dir = None
+            mock_args.no_preflight = True
+            mock_args.section = []
+            mock_parse.return_value = mock_args
+
+            with patch("toda.__main__.Actions") as mock_actions:
+                mock_actions_instance = MagicMock()
+                mock_actions.return_value = mock_actions_instance
+
+                main()
+
+                mock_actions_instance.trace.assert_called_once()
+
+    def test_reconcile_action(self, temp_dir):
+        """Reconcile action calls reconcile method."""
+        from toda.__main__ import main
+
+        manifest_path = os.path.join(temp_dir, "MANIFEST")
+        with open(manifest_path, "w") as f:
+            f.write("$default\n")
+
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
+            mock_args = MagicMock()
+            mock_args.action = "reconcile"
+            mock_args.dry_run = False
+            mock_args.manifest = manifest_path
+            mock_args.force = False
+            mock_args.verbose = 0
+            mock_args.dir = None
+            mock_args.no_preflight = True
+            mock_args.section = []
+            mock_parse.return_value = mock_args
+
+            with patch("toda.__main__.Actions") as mock_actions:
+                mock_actions_instance = MagicMock()
+                mock_actions.return_value = mock_actions_instance
+
+                main()
+
+                mock_actions_instance.reconcile.assert_called_once()
+
+    def test_reconcile_action_raises_system_exit_with_code(self, temp_dir):
+        """Reconcile action exit code is forwarded as SystemExit."""
+        from toda.__main__ import main
+
+        manifest_path = os.path.join(temp_dir, "MANIFEST")
+        with open(manifest_path, "w") as f:
+            f.write("$default\n")
+
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
+            mock_args = MagicMock()
+            mock_args.action = "reconcile"
+            mock_args.dry_run = False
+            mock_args.manifest = manifest_path
+            mock_args.force = False
+            mock_args.verbose = 0
+            mock_args.dir = None
+            mock_args.no_preflight = True
+            mock_args.section = []
+            mock_parse.return_value = mock_args
+
+            with patch("toda.__main__.Actions") as mock_actions:
+                mock_actions_instance = MagicMock()
+                mock_actions_instance.reconcile.return_value = 2
+                mock_actions.return_value = mock_actions_instance
+
+                with pytest.raises(SystemExit) as exc:
+                    main()
+
+                assert exc.value.code == 2
+
     def test_default_section_is_default(self, temp_dir):
         """Default section is 'default' when none specified."""
         from toda.__main__ import main
@@ -103,7 +187,7 @@ class TestCLIArgumentParsing:
         with open(manifest_path, "w") as f:
             f.write("$default\n")
 
-        with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
             mock_args = MagicMock()
             mock_args.action = "inspect"
             mock_args.dry_run = False
@@ -129,7 +213,7 @@ class TestCLIArgumentParsing:
         with open(manifest_path, "w") as f:
             f.write("$mysection\n")
 
-        with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
             mock_args = MagicMock()
             mock_args.action = "inspect"
             mock_args.dry_run = False
@@ -154,7 +238,7 @@ class TestCLIArgumentParsing:
         with open(manifest_path, "w") as f:
             f.write("$default\n")
 
-        with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
             mock_args = MagicMock()
             mock_args.action = "inspect"
             mock_args.dry_run = False
@@ -182,7 +266,7 @@ class TestCLIArgumentParsing:
         with open(manifest_path, "w") as f:
             f.write("$default\n")
 
-        with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
             mock_args = MagicMock()
             mock_args.action = "inspect"
             mock_args.dry_run = True
@@ -221,7 +305,7 @@ class TestCLIArgumentParsing:
         with open(manifest_path, "w") as f:
             f.write("$default\n")
 
-        with patch("argparse.ArgumentParser.parse_args") as mock_parse:
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
             mock_args = MagicMock()
             mock_args.action = "inspect"
             mock_args.dry_run = False

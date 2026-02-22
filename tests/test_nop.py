@@ -1,6 +1,5 @@
 """Tests for toda.nop - No-op decorator for dry-run."""
 
-import pytest
 from toda.nop import nop
 
 

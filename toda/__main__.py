@@ -3,6 +3,7 @@ from __future__ import print_function
 import os
 import argparse
 import logging
+import sys
 
 from .model import Manifest
 from .controller import Actions
@@ -15,15 +16,25 @@ log.addHandler(logging.StreamHandler())
 
 def main():
     startdir = os.getcwd()
+    actions_help = """actions:
+  install     create links from manifest sections
+  purge       remove destination paths defined by manifest sections
+  inspect     print section include relationships
+  trace       show resolved link provenance (declaration source + include chain)
+  reconcile   diff expected links vs filesystem state (exit 0 clean, 2 drift/conflict, 1 error)
+"""
     parser = argparse.ArgumentParser(
-        description="creates symlinks described by a manifest"
+        description="creates symlinks described by a manifest",
+        epilog=actions_help,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "action",
-        choices=("install", "purge", "inspect"),
+        choices=("install", "purge", "inspect", "trace", "reconcile"),
         nargs="?",
         type=str,
         default="inspect",
+        help="action to run (default: inspect)",
     )
     parser.add_argument(
         "-n", "--dry-run", action="store_true", help="nop out all syscalls, verbose"
@@ -55,9 +66,30 @@ def main():
         action="store_true",
         dest="no_preflight",
     )
+    parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="output format for trace/reconcile actions",
+    )
+    parser.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="color mode for text output",
+    )
+    parser.add_argument(
+        "--only-changed",
+        action="store_true",
+        default=False,
+        help="for reconcile text output, hide entries with status=ok",
+    )
     parser.add_argument("section", help="manifest target", type=str, nargs="*")
 
-    args = parser.parse_args()
+    if hasattr(parser, "parse_intermixed_args"):
+        args = parser.parse_intermixed_args()
+    else:
+        args = parser.parse_args()
 
     if args.dry_run:
         from .nop import nop
@@ -86,8 +118,10 @@ def main():
         for sn in args.section:
             assert sn in m, "section `{:s}` is not in the manifest".format(sn)
 
-    getattr(Actions(m, args), args.action)()
+    exit_code = getattr(Actions(m, args), args.action)()
+    if isinstance(exit_code, int):
+        raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

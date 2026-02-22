@@ -208,16 +208,8 @@ class TestIntegrationErrorHandling:
         mock_args.section = ["a"]
         actions = Actions(m, mock_args)
 
-        # The current implementation may not detect all circular includes
-        # but self-includes should be caught
-        content2 = "$circular\n@include: circular\n"
-        path2 = manifest_file(content2, filename="MANIFEST2")
-        m2 = Manifest(path=path2, startdir=temp_dir)
-        mock_args.section = ["circular"]
-        actions2 = Actions(m2, mock_args)
-
-        with pytest.raises(AssertionError, match="inside itself"):
-            actions2.install()
+        with pytest.raises(AssertionError, match="include cycle detected"):
+            actions.install()
 
 
 class TestIntegrationTildeExpansion:

@@ -1,8 +1,8 @@
 """Tests for toda.controller - Actions."""
 
+import json
 import os
 import pytest
-from unittest.mock import patch, MagicMock
 from toda.model import Manifest
 from toda.controller import Actions, _deploy_one
 
@@ -287,3 +287,110 @@ class TestAssertSymlinkWorks:
             assert not os.path.lexists(target)
         finally:
             os.chdir(old_cwd)
+
+
+class TestActionsTrace:
+    """Test Actions.trace method."""
+
+    def test_trace_text_output(self, temp_dir, manifest_file, source_file, mock_args, capsys):
+        src = source_file(content="trace", filename="source.txt")
+        src_basename = os.path.basename(src)
+        content = (
+            f"$base\n~/.base: {src_basename}\n"
+            f"$default\n@include: base\n~/.default: {src_basename}\n"
+        )
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.action = "trace"
+        mock_args.section = ["default"]
+        mock_args.format = "text"
+        actions = Actions(m, mock_args)
+
+        actions.trace()
+
+        captured = capsys.readouterr()
+        assert "section=base" in captured.out
+        assert "chain=default -> base" in captured.out
+
+    def test_trace_json_output(self, temp_dir, manifest_file, source_file, mock_args, capsys):
+        src = source_file(content="trace", filename="source.txt")
+        src_basename = os.path.basename(src)
+        content = f"$default\n~/.default: {src_basename}\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.action = "trace"
+        mock_args.section = ["default"]
+        mock_args.format = "json"
+        actions = Actions(m, mock_args)
+
+        actions.trace()
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload[0]["declared_section"] == "default"
+        assert payload[0]["raw_declaration"] == "~/.default: source.txt"
+
+    def test_trace_skips_delete_macro(self, temp_dir, manifest_file, mock_args, capsys):
+        dest = os.path.join(temp_dir, "gone")
+        content = f"$default\n{dest}: @delete\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.action = "trace"
+        mock_args.section = ["default"]
+        mock_args.format = "json"
+        actions = Actions(m, mock_args)
+
+        actions.trace()
+        payload = json.loads(capsys.readouterr().out)
+        assert payload == []
+
+
+class TestActionsReconcile:
+    """Test Actions.reconcile method."""
+
+    def test_reconcile_outputs_statuses(self, temp_dir, manifest_file, source_file, mock_args, capsys):
+        src = source_file(content="reconcile", filename="source.txt")
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "dest")
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.action = "reconcile"
+        mock_args.section = ["default"]
+        mock_args.format = "text"
+        mock_args.color = "never"
+        actions = Actions(m, mock_args)
+
+        actions.reconcile()
+        captured = capsys.readouterr()
+        assert "missing" in captured.out
+        assert dest in captured.out
+
+    def test_reconcile_exit_code_for_drift(self, temp_dir, manifest_file, source_file, mock_args):
+        src = source_file(content="reconcile", filename="source.txt")
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "dest")
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.action = "reconcile"
+        mock_args.section = ["default"]
+        mock_args.format = "text"
+        mock_args.color = "never"
+        actions = Actions(m, mock_args)
+
+        assert actions.reconcile() == 2
+
+    def test_reconcile_exit_code_for_clean_state(self, temp_dir, manifest_file, source_file, mock_args):
+        src = source_file(content="reconcile", filename="source.txt")
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "dest")
+        os.symlink(src, dest)
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.action = "reconcile"
+        mock_args.section = ["default"]
+        mock_args.format = "json"
+        actions = Actions(m, mock_args)
+
+        assert actions.reconcile() == 0

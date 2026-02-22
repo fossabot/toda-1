@@ -131,8 +131,8 @@ class TestManifestIsMacroOrParsed:
         assert Manifest._is_macro_or_parsed("regular") is False
 
     def test_set_is_parsed(self):
-        # Sets are parsed @include values
-        assert Manifest._is_macro_or_parsed({"section1", "section2"}) is True
+        # Tuples are parsed @include values
+        assert Manifest._is_macro_or_parsed(("section1", "section2")) is True
 
     def test_none_is_not_parsed(self):
         assert not Manifest._is_macro_or_parsed(None)
@@ -169,8 +169,14 @@ class TestManifestParsing:
         path = manifest_file(content)
         m = Manifest(path=path, startdir=temp_dir)
         assert "@include" in m["extended"]
-        assert isinstance(m["extended"]["@include"], set)
+        assert isinstance(m["extended"]["@include"], tuple)
         assert "base" in m["extended"]["@include"]
+
+    def test_include_macro_is_deterministic(self, manifest_file, temp_dir):
+        content = "$extended\n@include: base extra base\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        assert m["extended"]["@include"] == ("base", "extra")
 
     def test_delete_macro(self, manifest_file, temp_dir):
         content = "$default\n~/.unwanted: @delete\n"
@@ -286,8 +292,15 @@ class TestManifestIterSection:
         content = "$circular\n@include: circular\n"
         path = manifest_file(content)
         m = Manifest(path=path, startdir=temp_dir)
-        with pytest.raises(AssertionError, match="inside itself"):
+        with pytest.raises(AssertionError, match="include cycle detected"):
             list(m.iter_section("circular"))
+
+    def test_multi_section_include_cycle_raises(self, manifest_file, temp_dir):
+        content = "$a\n@include: b\n$b\n@include: c\n$c\n@include: a\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        with pytest.raises(AssertionError, match="a -> b -> c -> a"):
+            list(m.iter_section("a"))
 
     def test_missing_include_dependency_raises(self, manifest_file, temp_dir):
         content = "$main\n@include: nonexistent\n"
@@ -311,3 +324,49 @@ class TestManifestConstants:
 
     def test_dest_macros_contains_include(self):
         assert Manifest.INCLUDE_MACRO in Manifest.DEST_MACROS
+
+
+class TestManifestProvenance:
+    """Test provenance tracking for resolved links."""
+
+    def test_provenance_for_direct_mapping(self, manifest_file, temp_dir, source_file):
+        src = source_file(content="source", filename="source.txt")
+        src_basename = os.path.basename(src)
+        content = f"$default\n~/.testrc: {src_basename}\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+
+        entries = list(m.iter_section_provenance("default"))
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry.declared_section == "default"
+        assert entry.declaration_line == 2
+        assert entry.raw_declaration == "~/.testrc: source.txt"
+        assert entry.include_chain == ("default",)
+        assert entry.manifest_path == path
+
+    def test_provenance_for_include_chain(self, manifest_file, temp_dir, source_file):
+        src = source_file(content="base", filename="base.txt")
+        src_basename = os.path.basename(src)
+        content = (
+            f"$base\n~/.base: {src_basename}\n"
+            f"$mid\n@include: base\n"
+            f"$full\n@include: mid\n~/.full: {src_basename}\n"
+        )
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+
+        entries = list(m.iter_section_provenance("full"))
+        include_entry = next(entry for entry in entries if entry.dest.endswith(".base"))
+        assert include_entry.include_chain == ("full", "mid", "base")
+
+    def test_provenance_for_glob(self, manifest_file, temp_dir, source_dir):
+        src_dir = source_dir(dirname="dotfiles", files={"a": "1", "b": "2"})
+        src_basename = os.path.basename(src_dir)
+        content = f"$default\n~/.config/: {src_basename}/*\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+
+        entries = list(m.iter_section_provenance("default"))
+        assert len(entries) == 2
+        assert all(entry.glob_origin == "dotfiles/*" for entry in entries)

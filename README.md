@@ -9,7 +9,7 @@ Toda ([תודה](https://en.wiktionary.org/wiki/%D7%AA%D7%95%D7%93%D7%94)) gives
 the power to safely deploy files using symlinks on any
 operating system with Python installed.
 
-Toda requires only core Python, supporting versions 3.8+. Toda has
+Toda requires only core Python, supporting versions 3.10+. Toda has
 multi-platform support for POSIX-compliant systems, Linux (Debian, Ubuntu, etc),
 Windows, macOS and BSDs in that order of priority.
 
@@ -18,13 +18,14 @@ rights.
 
 ## `toda`
 ```
-usage: toda [-h] [-n] [-m MANIFEST] [-f] [-v]
-                   [{install,purge,inspect}] [section [section ...]]
+usage: toda [-h] [-n] [-m MANIFEST] [-f] [-v] [-d DIR] [--no-preflight]
+            [--format {text,json}] [--color {auto,always,never}] [--only-changed]
+            [{install,purge,inspect,trace,reconcile}] [section [section ...]]
 
 creates symlinks described by a manifest
 
 positional arguments:
-  {install,purge,inspect}
+  {install,purge,inspect,trace,reconcile}
   section               manifest target
 
 optional arguments:
@@ -34,6 +35,12 @@ optional arguments:
                         path to custom manifest file
   -f, --force           allow clobbering files in target paths
   -v, --verbose
+  -d DIR, --dir DIR     override HOME and USERPROFILE (tilde expansion)
+  --no-preflight        skip the preflight sanity checks
+  --format {text,json}  output format for trace/reconcile actions
+  --color {auto,always,never}
+                        color mode for text output
+  --only-changed        for reconcile text output, hide entries with status=ok
 ```
 
 ## `MANIFEST` file syntax
@@ -48,6 +55,62 @@ optional arguments:
   - deletes `~/.old_config` if it exists
 
 - `@include: bin default`
-   - includes `bin` and `default`
-   - in each run of `manifest.py` includes are resolved recursively so that they
-       are only processed once
+  - includes `bin` and `default`
+  - includes are resolved recursively in deterministic order and each included
+    section is processed once
+
+## Provenance (`trace`)
+
+`trace` shows where each resolved link came from in the manifest:
+
+```bash
+toda trace default
+```
+
+Example text output:
+
+```text
+/Users/me/.config/git/config <- /repo/dotfiles/gitconfig [section=base line=12 chain=default -> base]
+```
+
+Use JSON for tooling:
+
+```bash
+toda trace --format json default
+```
+
+## Reconciliation (`reconcile`)
+
+`reconcile` compares manifest expectations against the filesystem and prints a
+colored diff-style report. It also returns non-zero for drift in CI usage.
+
+Statuses:
+
+- `ok` (green): destination exists as a symlink and points to expected source.
+- `missing` (red): destination does not exist.
+- `wrong_target` (red): destination is a symlink but points somewhere else.
+- `overwritten_file` (yellow): destination exists as a regular file.
+- `overwritten_dir` (yellow): destination exists as a directory.
+- `manifest_conflict` (magenta): multiple manifest declarations resolve to the
+  same destination with different sources.
+
+Examples:
+
+```bash
+toda reconcile --only-changed default
+toda reconcile --format json default
+toda reconcile --color never default
+```
+
+`reconcile` exit codes:
+
+- `0`: all links are `ok`
+- `2`: drift/conflicts detected
+- `1`: operational failure
+
+## CI Example
+
+```bash
+toda install --manifest ./MANIFEST --no-preflight default
+toda reconcile --manifest ./MANIFEST --format json --color never default
+```

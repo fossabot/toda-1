@@ -1,11 +1,17 @@
-from .model import Manifest
+import json
 import logging
-from os.path import exists, lexists
-from os import remove
+import sys
+from os import chdir, makedirs, remove, symlink
+from os.path import basename, dirname, exists, isdir, islink, lexists
 from pprint import pprint
-from os import symlink, makedirs, chdir
-from os.path import join, dirname, basename, lexists, exists, isdir, islink
 from shutil import rmtree
+
+from .model import Manifest
+from .reconcile import (
+    reconcile_manifest,
+    render_reconcile_json,
+    render_reconcile_text,
+)
 
 
 log = logging.getLogger(__name__)
@@ -79,11 +85,75 @@ class Actions:
             dict(
                 (
                     key,
-                    self.manifest[key].get("@include", None),
+                    self.manifest[key].get(Manifest.INCLUDE_MACRO, None),
                 )
                 for key in self.manifest.keys()
             )
         )
+
+    @staticmethod
+    def _serialize_trace_entry(entry):
+        return {
+            "dest": entry.dest,
+            "src": entry.src,
+            "declared_section": entry.declared_section,
+            "declaration_line": entry.declaration_line,
+            "manifest_path": entry.manifest_path,
+            "raw_declaration": entry.raw_declaration,
+            "include_chain": list(entry.include_chain),
+            "glob_origin": entry.glob_origin,
+        }
+
+    def trace(self):
+        records = []
+        for section in self.args.section:
+            for entry in self.manifest.iter_section_provenance(section):
+                if entry.src in Manifest.SRC_MACROS:
+                    continue
+                records.append(entry)
+
+        if self.args.format == "json":
+            payload = [self._serialize_trace_entry(entry) for entry in records]
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return
+
+        for entry in records:
+            print(
+                "{dest} <- {src} [section={section} line={line} chain={chain}]".format(
+                    dest=entry.dest,
+                    src=entry.src,
+                    section=entry.declared_section,
+                    line=entry.declaration_line,
+                    chain=" -> ".join(entry.include_chain),
+                )
+            )
+
+    def _run_reconcile(self):
+        return reconcile_manifest(self.manifest, self.args.section)
+
+    def _print_reconcile(self, result):
+        if self.args.format == "json":
+            print(render_reconcile_json(result))
+            return
+        print(
+            render_reconcile_text(
+                result,
+                color_mode=self.args.color,
+                only_changed=self.args.only_changed,
+                stream=sys.stdout,
+            )
+        )
+
+    def reconcile(self):
+        try:
+            result = self._run_reconcile()
+            self._print_reconcile(result)
+            if result.has_drift:
+                return 2
+            return 0
+        except Exception as exc:
+            log.error("reconcile failed: %s", exc)
+            return 1
 
     def _assert_symlink_works(self):
         if self.args.no_preflight:

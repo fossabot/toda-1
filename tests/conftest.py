@@ -72,6 +72,9 @@ def mock_args():
             self.verbose = 0
             self.dir = None
             self.no_preflight = True  # Skip preflight in tests
+            self.format = "text"
+            self.color = "never"
+            self.only_changed = False
             self.section = []
 
     return MockArgs()
