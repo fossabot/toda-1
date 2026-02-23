@@ -20,7 +20,7 @@ log.addHandler(logging.StreamHandler())
 
 
 def _deploy_one(dest, src, force):
-    # type: str, str, bool -> bool
+    # type: (str, str, bool) -> bool
     """
     :assumptions: manifest has already been parsed and validated.
     """
@@ -31,7 +31,7 @@ def _deploy_one(dest, src, force):
     if lexists(dest) or exists(dest):
         if not force:
             log.info("skipped (exists): %s" % dest)
-            return
+            return False
         if isdir(dest) and not islink(dest):
             rmtree(dest)
         else:
@@ -56,8 +56,10 @@ def _deploy_one(dest, src, force):
     try:
         symlink(src, destname)
         log.warning("linked %s" % dest)
+        return True
     except OSError as e:
         log.error("failure - %s :: %s" % (e, dest))
+        return False
 
 
 class Actions:
