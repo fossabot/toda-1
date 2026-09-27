@@ -12,11 +12,11 @@ class TestManifestInit:
     def test_init_no_path(self, temp_dir):
         """Manifest can be created without a path."""
         m = Manifest(startdir=temp_dir)
-        assert len(m) == 0
+        assert len(m.sections) == 0
 
     def test_init_with_invalid_kwarg(self, temp_dir):
-        """Invalid kwargs raise ValueError."""
-        with pytest.raises(ValueError):
+        """Invalid kwargs raise TypeError."""
+        with pytest.raises(TypeError):
             Manifest(invalid_arg="test", startdir=temp_dir)
 
     def test_init_with_startdir(self, temp_dir):

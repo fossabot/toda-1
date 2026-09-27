@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 import os
 from os.path import abspath, dirname, expanduser, join, normpath
+from typing import ClassVar, Iterable, Iterator, TextIO
 
 from .errors import ManifestError, SectionNotFound
 
 log = logging.getLogger(__name__)
+
+Section = dict[str, "str | tuple[str, ...]"]
 
 
 class IllegalSyntax(ManifestError):
@@ -34,35 +37,49 @@ class ResolvedLink:
     glob_origin: str | None = None
 
 
-class Manifest(dict):
-    DELETE_MACRO = "@delete"
-    INCLUDE_MACRO = "@include"
-    SRC_MACROS = {DELETE_MACRO}
-    DEST_MACROS = {INCLUDE_MACRO}
-    INIT_KWARGS = {"path", "startdir"}
+@dataclass
+class Manifest:
+    """A parsed MANIFEST: a mapping of section name to `Section`.
 
-    def __init__(self, **kw):
-        for key in kw.keys():
-            if key not in self.INIT_KWARGS:
-                raise ValueError("{:s} is an invalid keyword-argument".format(key))
-        path = kw.get("path")
-        self._startdir = kw.get("startdir")
-        if not self._startdir:
-            self._startdir = os.getcwd()
-        self._manifest_path = normpath(path) if path else "<memory>"
-        self._srcdir = dirname(abspath(path)) if path else self._startdir
-        self._declaration_metadata = {}
-        if not path:
+    Use `iter_section_provenance`/`iter_section` to resolve links; the
+    `sections` mapping (and the dict-like `__contains__`/`__getitem__`
+    convenience methods) are for inspecting the raw, unresolved declarations.
+    """
+
+    DELETE_MACRO: ClassVar[str] = "@delete"
+    INCLUDE_MACRO: ClassVar[str] = "@include"
+    SRC_MACROS: ClassVar[frozenset[str]] = frozenset({DELETE_MACRO})
+    DEST_MACROS: ClassVar[frozenset[str]] = frozenset({INCLUDE_MACRO})
+
+    path: str | None = None
+    startdir: str | None = None
+    sections: dict[str, Section] = field(default_factory=dict, init=False)
+
+    def __post_init__(self) -> None:
+        self._startdir = self.startdir or os.getcwd()
+        self._manifest_path = normpath(self.path) if self.path else "<memory>"
+        self._srcdir = dirname(abspath(self.path)) if self.path else self._startdir
+        self._declaration_metadata: dict[tuple[str, str], DeclarationMetadata] = {}
+        if not self.path:
             return
-        with open(path, "r") as fp:
+        with open(self.path, "r") as fp:
             self._parse(fp)
 
-    @staticmethod
-    def _parse_line_comment(line):
-        return not line or len(line) and line[0] == "#"
+    def __contains__(self, section_name: object) -> bool:
+        return section_name in self.sections
+
+    def __getitem__(self, section_name: str) -> Section:
+        return self.sections[section_name]
+
+    def keys(self) -> Iterable[str]:
+        return self.sections.keys()
 
     @staticmethod
-    def _parse_line_section_declaration(line):
+    def _parse_line_comment(line: str) -> bool:
+        return not line or line[0] == "#"
+
+    @staticmethod
+    def _parse_line_section_declaration(line: str) -> str | None:
         has_prefix = line and len(line) and line[0] == "$"
         if not has_prefix:
             return None
@@ -76,28 +93,30 @@ class Manifest(dict):
         return name
 
     @staticmethod
-    def _parse_part_macro(part):
-        return part and isinstance(part, str) and part.startswith("@")
+    def _parse_part_macro(part: str | None) -> bool:
+        return bool(part) and isinstance(part, str) and part.startswith("@")
 
     @staticmethod
-    def _is_macro_or_parsed(rubberducky):
-        return rubberducky and (
+    def _is_macro_or_parsed(rubberducky: str | tuple[str, ...]) -> bool:
+        return bool(rubberducky) and (
             not isinstance(rubberducky, str) or rubberducky.startswith("@")
         )
 
     @staticmethod
-    def _parse_part_terminal_glob(part):
-        return part and isinstance(part, str) and part.endswith("*")
+    def _parse_part_terminal_glob(part: str | None) -> bool:
+        return bool(part) and isinstance(part, str) and part.endswith("*")
 
     @staticmethod
-    def _parse_includes(part):
-        includes = []
+    def _parse_includes(part: str) -> tuple[str, ...]:
+        includes: list[str] = []
         for include in part.split():
             if include not in includes:
                 includes.append(include)
         return tuple(includes)
 
-    def _add_declaration_metadata(self, section_name, dest, line_number, raw_declaration):
+    def _add_declaration_metadata(
+        self, section_name: str, dest: str, line_number: int, raw_declaration: str
+    ) -> None:
         self._declaration_metadata[(section_name, dest)] = DeclarationMetadata(
             section=section_name,
             line_number=line_number,
@@ -105,12 +124,14 @@ class Manifest(dict):
             raw_declaration=raw_declaration,
         )
 
-    def get_declaration_metadata(self, section_name, dest):
+    def get_declaration_metadata(
+        self, section_name: str, dest: str
+    ) -> DeclarationMetadata:
         return self._declaration_metadata[(section_name, dest)]
 
-    def _parse(self, fp):
-        section = None
-        section_name = None
+    def _parse(self, fp: TextIO) -> None:
+        section: Section | None = None
+        section_name: str | None = None
         for i, raw_line in enumerate(fp, 1):
             line = raw_line.strip()
             if self._parse_line_comment(line):
@@ -121,12 +142,12 @@ class Manifest(dict):
             except IllegalSyntax as e:
                 raise IllegalSyntax("line {:d}: {}".format(i, e)) from None
             if new_section:
-                if new_section in self:
+                if new_section in self.sections:
                     raise IllegalSyntax(
                         "line {:d}: duplicate section declaration".format(i)
                     )
                 section_name = new_section
-                section = self[new_section] = dict()
+                section = self.sections[new_section] = {}
                 continue
             elif section is None or section_name is None:
                 raise IllegalSyntax(
@@ -141,7 +162,7 @@ class Manifest(dict):
             if unparsed_separators:
                 raise IllegalSyntax("line {:d}: multiple colons".format(i))
 
-            dest, src = list(map(lambda p: p.strip(), paths))
+            dest, src = (p.strip() for p in paths)
             dest_is_macro = self._parse_part_macro(dest)
             src_is_macro = self._parse_part_macro(src)
 
@@ -155,8 +176,9 @@ class Manifest(dict):
                 if dest not in self.DEST_MACROS:
                     raise IllegalSyntax("line {:d}: invalid {:}".format(i, dest))
 
+            resolved_src: str | tuple[str, ...] = src
             if dest == self.INCLUDE_MACRO:
-                src = self._parse_includes(src)
+                resolved_src = self._parse_includes(src)
             elif src_is_macro:
                 if src not in self.SRC_MACROS:
                     raise IllegalSyntax("line {:d}: invalid {:}".format(i, src))
@@ -170,7 +192,7 @@ class Manifest(dict):
                         )
                     )
 
-            section[dest] = src
+            section[dest] = resolved_src
             self._add_declaration_metadata(
                 section_name=section_name,
                 dest=dest,
@@ -178,9 +200,16 @@ class Manifest(dict):
                 raw_declaration=line,
             )
 
-    def _resolve_link(self, section_name, dest, src, include_chain):
+    def _resolve_link(
+        self,
+        section_name: str,
+        dest: str,
+        src: str | tuple[str, ...],
+        include_chain: tuple[str, ...],
+    ) -> list[ResolvedLink]:
         metadata = self.get_declaration_metadata(section_name, dest)
         resolved_dest = normpath(expanduser(dest))
+        assert isinstance(src, str)
         if src in self.SRC_MACROS:
             return [
                 ResolvedLink(
@@ -231,12 +260,12 @@ class Manifest(dict):
 
     def _iter_section_provenance(
         self,
-        section_name,
-        include_chain,
-        active_stack,
-        expanded_includes,
-        from_include=False,
-    ):
+        section_name: str,
+        include_chain: tuple[str, ...],
+        active_stack: tuple[str, ...],
+        expanded_includes: set[str],
+        from_include: bool = False,
+    ) -> Iterator[ResolvedLink]:
         if section_name in active_stack:
             cycle = " -> ".join(active_stack + (section_name,))
             raise ManifestError("include cycle detected: {:s}".format(cycle))
@@ -247,11 +276,12 @@ class Manifest(dict):
             expanded_includes.add(section_name)
 
         stack = active_stack + (section_name,)
-        for dest, src in self[section_name].items():
+        for dest, src in self.sections[section_name].items():
             if self._is_macro_or_parsed(dest):
                 if dest == self.INCLUDE_MACRO:
+                    assert isinstance(src, tuple)
                     for include_name in src:
-                        if include_name not in self:
+                        if include_name not in self.sections:
                             raise SectionNotFound(
                                 "cannot include `{:}` dependency `{:}` "
                                 "does not exist".format(section_name, include_name)
@@ -270,8 +300,10 @@ class Manifest(dict):
             for link in self._resolve_link(section_name, dest, src, include_chain):
                 yield link
 
-    def iter_section_provenance(self, section_name, included=None):
-        if section_name not in self:
+    def iter_section_provenance(
+        self, section_name: str, included: set[str] | None = None
+    ) -> Iterator[ResolvedLink]:
+        if section_name not in self.sections:
             raise SectionNotFound(
                 "section `{:s}` is not in the manifest".format(section_name)
             )
@@ -286,6 +318,8 @@ class Manifest(dict):
         ):
             yield link
 
-    def iter_section(self, section_name, included=None):
+    def iter_section(
+        self, section_name: str, included: set[str] | None = None
+    ) -> Iterator[tuple[str, str]]:
         for link in self.iter_section_provenance(section_name, included=included):
             yield link.dest, link.src

@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import logging
+import os
+from dataclasses import dataclass
+from datetime import datetime
+from os import makedirs, remove, symlink
+from os.path import dirname, exists, isdir, islink, lexists
+
+from .errors import DeployError, SourceMissing, TodaError
+from .model import Manifest
+from .reconcile import (
+    STATUS_MANIFEST_CONFLICT,
+    STATUS_MISSING,
+    STATUS_OK,
+    ReconcileEntry,
+    ReconcileResult,
+    reconcile_manifest,
+)
+
+log = logging.getLogger(__name__)
+
+OP_CREATE = "create"
+OP_REPLACE = "replace"
+OP_REMOVE = "remove"
+OP_SKIP = "skip"
+OP_NOOP = "noop"
+
+OUTCOME_LINKED = "linked"
+OUTCOME_DELETED = "deleted"
+OUTCOME_NOOP = "noop"
+OUTCOME_SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class Operation:
+    action: str
+    dest: str
+    src: str | None
+    actual_kind: str
+    reason: str | None = None
+    for_delete: bool = False
+
+
+@dataclass(frozen=True)
+class Plan:
+    operations: tuple[Operation, ...]
+    action: str
+
+
+def _collect_delete_dests(manifest: Manifest, sections: list[str]) -> tuple[str, ...]:
+    dests: list[str] = []
+    seen: set[str] = set()
+    for section in sections:
+        for entry in manifest.iter_section_provenance(section):
+            if entry.src == Manifest.DELETE_MACRO and entry.dest not in seen:
+                seen.add(entry.dest)
+                dests.append(entry.dest)
+    return tuple(dests)
+
+
+def _delete_operation(dest: str) -> Operation:
+    if islink(dest):
+        return Operation(OP_REMOVE, dest, None, "symlink", for_delete=True)
+    if isdir(dest):
+        return Operation(
+            OP_REMOVE,
+            dest,
+            None,
+            "directory",
+            "cannot delete a directory",
+            for_delete=True,
+        )
+    if lexists(dest):
+        return Operation(OP_REMOVE, dest, None, "file", for_delete=True)
+    return Operation(OP_NOOP, dest, None, "missing", for_delete=True)
+
+
+def _install_operation(entry: ReconcileEntry, force: bool) -> Operation:
+    if entry.status == STATUS_OK:
+        return Operation(OP_NOOP, entry.dest, entry.expected_src, entry.actual_kind)
+    if entry.status == STATUS_MISSING:
+        return Operation(OP_CREATE, entry.dest, entry.expected_src, entry.actual_kind)
+    if entry.status == STATUS_MANIFEST_CONFLICT:
+        reason = "conflicting sources declared: {:}".format(
+            ", ".join(entry.conflict_sources)
+        )
+        return Operation(OP_SKIP, entry.dest, None, entry.actual_kind, reason)
+    if force:
+        return Operation(
+            OP_REPLACE, entry.dest, entry.expected_src, entry.actual_kind, entry.status
+        )
+    return Operation(
+        OP_SKIP, entry.dest, entry.expected_src, entry.actual_kind, entry.status
+    )
+
+
+def _purge_operation(entry: ReconcileEntry, force: bool) -> Operation:
+    if entry.status == STATUS_MISSING:
+        return Operation(OP_NOOP, entry.dest, entry.expected_src, entry.actual_kind)
+    if entry.status == STATUS_OK:
+        return Operation(OP_REMOVE, entry.dest, entry.expected_src, entry.actual_kind)
+    if entry.status == STATUS_MANIFEST_CONFLICT:
+        reason = "conflicting sources declared: {:}".format(
+            ", ".join(entry.conflict_sources)
+        )
+        return Operation(OP_SKIP, entry.dest, None, entry.actual_kind, reason)
+    if force:
+        return Operation(
+            OP_REMOVE, entry.dest, entry.expected_src, entry.actual_kind, entry.status
+        )
+    return Operation(
+        OP_SKIP, entry.dest, entry.expected_src, entry.actual_kind, entry.status
+    )
+
+
+def build_plan(
+    manifest: Manifest, sections: list[str], action: str, force: bool = False
+) -> Plan:
+    """Compute the operations `apply()` would perform for `action` ("install"
+    or "purge"), without touching the filesystem."""
+
+    result: ReconcileResult = reconcile_manifest(manifest, sections)
+    operations: list[Operation] = []
+
+    if action == "install":
+        for dest in _collect_delete_dests(manifest, sections):
+            operations.append(_delete_operation(dest))
+        for entry in result.entries:
+            operations.append(_install_operation(entry, force))
+    elif action == "purge":
+        for entry in result.entries:
+            operations.append(_purge_operation(entry, force))
+    else:
+        raise ValueError("unsupported plan action `{:}`".format(action))
+
+    return Plan(operations=tuple(operations), action=action)
+
+
+def render_plan_text(plan: Plan) -> str:
+    verb = {
+        OP_CREATE: "would link",
+        OP_REPLACE: "would replace",
+        OP_REMOVE: "would remove",
+        OP_SKIP: "would skip",
+        OP_NOOP: "no change",
+    }
+    lines = []
+    for op in plan.operations:
+        line = "{verb} {dest}".format(verb=verb[op.action], dest=op.dest)
+        if op.src:
+            line += " -> {:}".format(op.src)
+        if op.reason:
+            line += " ({:})".format(op.reason)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _backup_path(dest: str) -> str:
+    backup = dest + ".toda-backup"
+    if not lexists(backup):
+        return backup
+    return "{:}.{:}".format(backup, datetime.now().strftime("%Y%m%d%H%M%S"))
+
+
+def _remove_link_or_file(dest: str) -> None:
+    # A symlink to a directory can't be os.remove()'d on Windows, but
+    # os.rmdir() refuses a symlink to a directory on POSIX. Try both.
+    try:
+        remove(dest)
+    except OSError:
+        if islink(dest):
+            os.rmdir(dest)
+        else:
+            raise
+
+
+def _create_link(dest: str, src: str) -> None:
+    if not exists(src):
+        raise SourceMissing(
+            "manifest src `{:}` does not exist on the filesystem".format(src)
+        )
+    destdir = dirname(dest)
+    if not isdir(destdir):
+        makedirs(destdir, 0o755)
+    try:
+        symlink(src, dest, target_is_directory=isdir(src))
+    except OSError as e:
+        raise DeployError("failure - {:} :: {:}".format(e, dest)) from e
+
+
+def _apply_one(op: Operation) -> str:
+    if op.action == OP_NOOP:
+        log.debug("noop: %s" % op.dest)
+        return OUTCOME_NOOP
+
+    if op.action == OP_SKIP:
+        log.info("skipped (%s): %s" % (op.reason, op.dest))
+        return OUTCOME_SKIPPED
+
+    if op.action == OP_CREATE:
+        assert op.src is not None
+        _create_link(op.dest, op.src)
+        log.warning("linked %s" % op.dest)
+        return OUTCOME_LINKED
+
+    if op.action == OP_REPLACE:
+        assert op.src is not None
+        if op.actual_kind == "symlink":
+            _remove_link_or_file(op.dest)
+        else:
+            backup = _backup_path(op.dest)
+            os.rename(op.dest, backup)
+            log.warning("backed up %s -> %s" % (op.dest, backup))
+        _create_link(op.dest, op.src)
+        log.warning("linked %s" % op.dest)
+        return OUTCOME_LINKED
+
+    if op.action == OP_REMOVE:
+        if op.for_delete:
+            if op.actual_kind == "directory":
+                raise DeployError(
+                    "{:} is a directory, refusing to delete".format(op.dest)
+                )
+            _remove_link_or_file(op.dest)
+            log.warning("deleted %s" % op.dest)
+            return OUTCOME_DELETED
+        if op.actual_kind == "symlink":
+            _remove_link_or_file(op.dest)
+            log.warning("purged %s" % op.dest)
+            return OUTCOME_DELETED
+        backup = _backup_path(op.dest)
+        os.rename(op.dest, backup)
+        log.warning("backed up %s -> %s" % (op.dest, backup))
+        return OUTCOME_DELETED
+
+    raise ValueError("unsupported operation action `{:}`".format(op.action))
+
+
+def apply(plan: Plan, strict: bool = False) -> int:
+    """Execute `plan`'s operations against the real filesystem.
+
+    Returns 1 if any operation failed, or was skipped while `strict`.
+    """
+    failed = False
+    for op in plan.operations:
+        try:
+            outcome = _apply_one(op)
+        except (TodaError, OSError) as e:
+            log.error("failure - %s :: %s" % (e, op.dest))
+            failed = True
+            continue
+        if outcome == OUTCOME_SKIPPED and strict:
+            failed = True
+    return 1 if failed else 0

@@ -1,18 +1,19 @@
+from __future__ import annotations
+
 import json
 import logging
-import os
 import sys
 import tempfile
-from datetime import datetime
-from os import makedirs, remove, symlink
-from os.path import dirname, exists, isdir, islink, join, lexists
+from os import symlink
+from os.path import join
 from pprint import pprint
+from typing import Any
 
-from .errors import DeployError, SourceMissing, TodaError
+from .errors import DeployError
 from .model import Manifest
+from .plan import apply, build_plan, render_plan_text
 from .reconcile import (
-    _normalize_target,
-    _same_target,
+    ReconcileResult,
     reconcile_manifest,
     render_reconcile_json,
     render_reconcile_text,
@@ -20,166 +21,29 @@ from .reconcile import (
 
 log = logging.getLogger(__name__)
 
-DEPLOY_LINKED = "linked"
-DEPLOY_NOOP = "noop"
-DEPLOY_SKIPPED = "skipped"
-DEPLOY_DELETED = "deleted"
-DEPLOY_FAILED = "failed"
-
-
-def _backup_path(dest):
-    backup = dest + ".toda-backup"
-    if not lexists(backup):
-        return backup
-    return "{:}.{:}".format(backup, datetime.now().strftime("%Y%m%d%H%M%S"))
-
-
-def _remove_link_or_file(dest):
-    # A symlink to a directory can't be os.remove()'d on Windows, but
-    # os.rmdir() refuses a symlink to a directory on POSIX. Try both.
-    try:
-        remove(dest)
-    except OSError:
-        if islink(dest):
-            os.rmdir(dest)
-        else:
-            raise
-
-
-def _delete_one(dest):
-    if islink(dest):
-        _remove_link_or_file(dest)
-        log.warning("deleted %s" % dest)
-        return DEPLOY_DELETED
-    if isdir(dest):
-        log.error("failure - %s is a directory, refusing to delete" % dest)
-        return DEPLOY_FAILED
-    if lexists(dest):
-        remove(dest)
-        log.warning("deleted %s" % dest)
-        return DEPLOY_DELETED
-    return DEPLOY_DELETED
-
-
-def _deploy_one(dest, src, force):
-    """
-    :assumptions: manifest has already been parsed and validated.
-    """
-
-    if src == Manifest.DELETE_MACRO:
-        return _delete_one(dest)
-
-    if not exists(src):
-        raise SourceMissing(
-            "manifest src `{:}` does not exist on the filesystem".format(src)
-        )
-
-    if islink(dest):
-        try:
-            actual_target = _normalize_target(dest, os.readlink(dest))
-        except OSError:
-            actual_target = None
-        if actual_target is not None and _same_target(actual_target, src):
-            log.debug("already linked: %s" % dest)
-            return DEPLOY_NOOP
-        if not force:
-            log.info("skipped (exists): %s" % dest)
-            return DEPLOY_SKIPPED
-        _remove_link_or_file(dest)
-    elif lexists(dest):
-        if not force:
-            log.info("skipped (exists): %s" % dest)
-            return DEPLOY_SKIPPED
-        backup = _backup_path(dest)
-        os.rename(dest, backup)
-        log.warning("backed up %s -> %s" % (dest, backup))
-
-    destdir = dirname(dest)
-    if not isdir(destdir):
-        makedirs(destdir, 0o755)
-
-    try:
-        symlink(src, dest, target_is_directory=isdir(src))
-        log.warning("linked %s" % dest)
-        return DEPLOY_LINKED
-    except OSError as e:
-        log.error("failure - %s :: %s" % (e, dest))
-        return DEPLOY_FAILED
-
-
-def _purge_one(dest, expected_src, force):
-    if not lexists(dest):
-        return DEPLOY_NOOP
-
-    if islink(dest):
-        try:
-            actual_target = _normalize_target(dest, os.readlink(dest))
-        except OSError:
-            actual_target = None
-        if actual_target is None or _same_target(actual_target, expected_src):
-            _remove_link_or_file(dest)
-            log.warning("purged %s" % dest)
-            return DEPLOY_DELETED
-        if not force:
-            log.info("skipped (unowned symlink): %s" % dest)
-            return DEPLOY_SKIPPED
-        _remove_link_or_file(dest)
-        log.warning("purged %s" % dest)
-        return DEPLOY_DELETED
-
-    if not force:
-        log.info("skipped (not a symlink): %s" % dest)
-        return DEPLOY_SKIPPED
-    backup = _backup_path(dest)
-    os.rename(dest, backup)
-    log.warning("backed up %s -> %s" % (dest, backup))
-    return DEPLOY_DELETED
-
 
 class Actions:
-    def __init__(self, manifest, args):
+    def __init__(self, manifest: Manifest, args: Any) -> None:
         self.manifest = manifest
         self.args = args
         self._assert_symlink_works()
 
-    def install(self):
-        strict = getattr(self.args, "strict", False)
-        failed = False
-        for section in self.args.section:
-            for dest, src in self.manifest.iter_section(section):
-                log.debug("installing {:s}".format(dest))
-                try:
-                    outcome = _deploy_one(dest, src, force=self.args.force)
-                except (TodaError, OSError) as e:
-                    log.error("failure - %s :: %s" % (e, dest))
-                    failed = True
-                    continue
-                if outcome == DEPLOY_FAILED:
-                    failed = True
-                elif outcome == DEPLOY_SKIPPED and strict:
-                    failed = True
-        return 1 if failed else 0
+    def install(self) -> int:
+        return self._install_or_purge("install")
 
-    def purge(self):
-        strict = getattr(self.args, "strict", False)
-        failed = False
-        for section in self.args.section:
-            for dest, src in self.manifest.iter_section(section):
-                if src in Manifest.SRC_MACROS:
-                    continue
-                try:
-                    outcome = _purge_one(dest, src, force=self.args.force)
-                except (TodaError, OSError) as e:
-                    log.error("failure - %s :: %s" % (e, dest))
-                    failed = True
-                    continue
-                if outcome == DEPLOY_FAILED:
-                    failed = True
-                elif outcome == DEPLOY_SKIPPED and strict:
-                    failed = True
-        return 1 if failed else 0
+    def purge(self) -> int:
+        return self._install_or_purge("purge")
 
-    def inspect(self):
+    def _install_or_purge(self, action: str) -> int:
+        plan = build_plan(
+            self.manifest, self.args.section, action, force=self.args.force
+        )
+        if self.args.dry_run:
+            print(render_plan_text(plan))
+            return 0
+        return apply(plan, strict=getattr(self.args, "strict", False))
+
+    def inspect(self) -> None:
         print("inspecting...")
         pprint(
             dict(
@@ -192,7 +56,7 @@ class Actions:
         )
 
     @staticmethod
-    def _serialize_trace_entry(entry):
+    def _serialize_trace_entry(entry: Any) -> dict[str, Any]:
         return {
             "dest": entry.dest,
             "src": entry.src,
@@ -204,7 +68,7 @@ class Actions:
             "glob_origin": entry.glob_origin,
         }
 
-    def trace(self):
+    def trace(self) -> None:
         records = []
         for section in self.args.section:
             for entry in self.manifest.iter_section_provenance(section):
@@ -228,10 +92,10 @@ class Actions:
                 )
             )
 
-    def _run_reconcile(self):
+    def _run_reconcile(self) -> ReconcileResult:
         return reconcile_manifest(self.manifest, self.args.section)
 
-    def _print_reconcile(self, result):
+    def _print_reconcile(self, result: ReconcileResult) -> None:
         if self.args.format == "json":
             print(render_reconcile_json(result))
             return
@@ -244,7 +108,7 @@ class Actions:
             )
         )
 
-    def reconcile(self):
+    def reconcile(self) -> int:
         try:
             result = self._run_reconcile()
             self._print_reconcile(result)
@@ -255,8 +119,8 @@ class Actions:
             log.error("reconcile failed: %s", exc)
             return 1
 
-    def _assert_symlink_works(self):
-        if self.args.no_preflight:
+    def _assert_symlink_works(self) -> None:
+        if self.args.no_preflight or self.args.dry_run:
             return
         with tempfile.TemporaryDirectory(prefix="toda-preflight-") as tmp:
             try:

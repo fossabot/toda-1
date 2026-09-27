@@ -53,6 +53,9 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["toda*"]
 
+[tool.setuptools.package-data]
+toda = ["py.typed"]
+
 [tool.setuptools_scm]
 fallback_version = "0.0.1"
 local_scheme = "no-local-version"
@@ -81,7 +84,7 @@ select = ["F"]
 python_version = "3.10"
 warn_unused_configs = true
 ignore_missing_imports = true
-check_untyped_defs = false
+check_untyped_defs = true
 warn_unused_ignores = true
 
 [tool.pytest.ini_options]
