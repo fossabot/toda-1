@@ -280,25 +280,21 @@ class TestCLIArgumentParsing:
 
             with patch("toda.__main__.Actions"):
                 # Store original functions
-                original_rmtree = controller.rmtree
                 original_remove = controller.remove
                 original_makedirs = controller.makedirs
                 original_symlink = controller.symlink
-                original_chdir = controller.chdir
 
                 try:
                     main()
                     assert mock_args.verbose == 3
                 finally:
                     # Restore original functions
-                    controller.rmtree = original_rmtree
                     controller.remove = original_remove
                     controller.makedirs = original_makedirs
                     controller.symlink = original_symlink
-                    controller.chdir = original_chdir
 
-    def test_invalid_section_raises(self, temp_dir):
-        """Invalid section name raises AssertionError."""
+    def test_invalid_section_raises(self, temp_dir, capsys):
+        """Invalid section name prints a clean one-line error and returns 1."""
         from toda.__main__ import main
 
         manifest_path = os.path.join(temp_dir, "MANIFEST")
@@ -317,8 +313,10 @@ class TestCLIArgumentParsing:
             mock_args.section = ["nonexistent"]
             mock_parse.return_value = mock_args
 
-            with pytest.raises(AssertionError, match="not in the manifest"):
-                main()
+            assert main() == 1
+
+        err = capsys.readouterr().err
+        assert err.strip() == "toda: error: section `nonexistent` is not in the manifest"
 
     def test_help_action_prints_help(self, capsys):
         """'help' action prints full help without loading a manifest."""
@@ -332,3 +330,33 @@ class TestCLIArgumentParsing:
         out = capsys.readouterr().out
         assert "usage: toda" in out
         assert "reconcile" in out
+
+    def test_install_exit_code_via_system_exit(self, temp_dir):
+        """install()'s int return code is surfaced as SystemExit, not swallowed."""
+        from toda.__main__ import main
+
+        manifest_path = os.path.join(temp_dir, "MANIFEST")
+        with open(manifest_path, "w") as f:
+            f.write("$default\n")
+
+        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
+            mock_args = MagicMock()
+            mock_args.action = "install"
+            mock_args.dry_run = False
+            mock_args.manifest = manifest_path
+            mock_args.force = False
+            mock_args.verbose = 0
+            mock_args.dir = None
+            mock_args.no_preflight = True
+            mock_args.section = []
+            mock_parse.return_value = mock_args
+
+            with patch("toda.__main__.Actions") as mock_actions:
+                mock_actions_instance = MagicMock()
+                mock_actions_instance.install.return_value = 1
+                mock_actions.return_value = mock_actions_instance
+
+                with pytest.raises(SystemExit) as exc:
+                    main()
+
+                assert exc.value.code == 1

@@ -1,8 +1,6 @@
 import logging
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.WARN)
-log.addHandler(logging.StreamHandler())
 
 
 def nop(f):
