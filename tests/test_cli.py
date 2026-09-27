@@ -280,6 +280,45 @@ class TestCLIArgumentParsing:
         assert "would link" in out
         assert dest in out
 
+    def test_install_force_removes_directory(self, temp_dir, capsys):
+        """--force deletes a @delete destination that is a directory."""
+        from toda.__main__ import main
+
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(os.path.join(dest, "sub"))
+        manifest_path = os.path.join(temp_dir, "MANIFEST")
+        with open(manifest_path, "w") as f:
+            f.write(f"$default\n{dest}: @delete\n")
+
+        argv = ["toda", "--no-preflight", "-m", manifest_path, "-f", "install"]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+
+        assert not os.path.lexists(dest)
+
+    def test_dry_run_with_force_leaves_directory(self, temp_dir, capsys):
+        """-n prints the forced removal and never performs it."""
+        from toda.__main__ import main
+
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(dest)
+        manifest_path = os.path.join(temp_dir, "MANIFEST")
+        with open(manifest_path, "w") as f:
+            f.write(f"$default\n{dest}: @delete\n")
+
+        argv = ["toda", "--no-preflight", "-m", manifest_path, "-n", "-f", "install"]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
+
+        assert os.path.isdir(dest)
+        out = capsys.readouterr().out
+        assert "would remove" in out
+        assert "recursive delete (--force)" in out
+
     def test_invalid_section_raises(self, temp_dir, capsys):
         """Invalid section name prints a clean one-line error and returns 1."""
         from toda.__main__ import main

@@ -2,10 +2,21 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import stat
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from os import makedirs, remove, symlink
-from os.path import dirname, exists, isdir, islink, lexists
+from os.path import (
+    dirname,
+    exists,
+    expanduser,
+    isdir,
+    islink,
+    lexists,
+    normpath,
+)
 
 from .errors import DeployError, SourceMissing, TodaError
 from .model import Manifest
@@ -40,6 +51,7 @@ class Operation:
     actual_kind: str
     reason: str | None = None
     for_delete: bool = False
+    force: bool = False
 
 
 @dataclass(frozen=True)
@@ -59,10 +71,24 @@ def _collect_delete_dests(manifest: Manifest, sections: list[str]) -> tuple[str,
     return tuple(dests)
 
 
-def _delete_operation(dest: str) -> Operation:
+def _is_top_level(dest: str) -> bool:
+    return normpath(dest) in {os.sep, normpath(expanduser("~"))}
+
+
+def _delete_operation(dest: str, force: bool) -> Operation:
     if islink(dest):
-        return Operation(OP_REMOVE, dest, None, "symlink", for_delete=True)
+        return Operation(OP_REMOVE, dest, None, "symlink", for_delete=True, force=force)
     if isdir(dest):
+        if force and not _is_top_level(dest):
+            return Operation(
+                OP_REMOVE,
+                dest,
+                None,
+                "directory",
+                "recursive delete (--force)",
+                for_delete=True,
+                force=True,
+            )
         return Operation(
             OP_REMOVE,
             dest,
@@ -72,7 +98,7 @@ def _delete_operation(dest: str) -> Operation:
             for_delete=True,
         )
     if lexists(dest):
-        return Operation(OP_REMOVE, dest, None, "file", for_delete=True)
+        return Operation(OP_REMOVE, dest, None, "file", for_delete=True, force=force)
     return Operation(OP_NOOP, dest, None, "missing", for_delete=True)
 
 
@@ -125,7 +151,7 @@ def build_plan(
 
     if action == "install":
         for dest in _collect_delete_dests(manifest, sections):
-            operations.append(_delete_operation(dest))
+            operations.append(_delete_operation(dest, force))
         for entry in result.entries:
             operations.append(_install_operation(entry, force))
     elif action == "purge":
@@ -175,6 +201,39 @@ def _remove_link_or_file(dest: str) -> None:
             raise
 
 
+def _make_writable(path: str) -> None:
+    mode = os.stat(path).st_mode
+    extra = stat.S_IWUSR | (stat.S_IXUSR if stat.S_ISDIR(mode) else 0)
+    os.chmod(path, mode | extra)
+
+
+def _remove_tree(dest: str) -> None:
+    def clear_and_retry(func, path, _exc):
+        # Unlinking an entry needs write permission on its directory, not on
+        # the entry itself.
+        _make_writable(dirname(path) or ".")
+        if not islink(path):
+            _make_writable(path)
+        func(path)
+
+    if sys.version_info >= (3, 12):
+        # 3.12 replaced onerror with onexc, which mypy rejects while it checks
+        # against the 3.10 stubs, so reach rmtree dynamically.
+        getattr(shutil, "rmtree")(dest, onexc=clear_and_retry)  # noqa: B009
+    else:
+        shutil.rmtree(dest, onerror=clear_and_retry)
+
+
+def _remove_link_or_file_forced(dest: str) -> None:
+    try:
+        _remove_link_or_file(dest)
+    except PermissionError:
+        _make_writable(dirname(dest) or ".")
+        if not islink(dest):
+            _make_writable(dest)
+        _remove_link_or_file(dest)
+
+
 def _create_link(dest: str, src: str) -> None:
     if not exists(src):
         raise SourceMissing(
@@ -219,10 +278,15 @@ def _apply_one(op: Operation) -> str:
     if op.action == OP_REMOVE:
         if op.for_delete:
             if op.actual_kind == "directory":
-                raise DeployError(
-                    "{:} is a directory, refusing to delete".format(op.dest)
-                )
-            _remove_link_or_file(op.dest)
+                if not op.force:
+                    raise DeployError(
+                        "{:} is a directory, refusing to delete".format(op.dest)
+                    )
+                _remove_tree(op.dest)
+            elif op.force:
+                _remove_link_or_file_forced(op.dest)
+            else:
+                _remove_link_or_file(op.dest)
             log.warning("deleted %s" % op.dest)
             return OUTCOME_DELETED
         if op.actual_kind == "symlink":

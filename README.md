@@ -91,7 +91,9 @@ help        show this help message and exit
 
 `install` and `purge` accept `-n/--dry-run`, which prints the plan instead of
 applying it, and `-f/--force`, which replaces an existing file or directory
-after moving it aside to `<dest>.toda-backup`.
+after moving it aside to `<dest>.toda-backup`. Under `--force`, `install`
+also removes an `@delete` destination that is a directory, along with
+everything in it.
 
 `purge` removes only symlinks toda owns, meaning links pointing at the
 expected source. A regular file that happens to sit at a manifest destination
@@ -114,7 +116,8 @@ is reported and left alone.
   - defines the `bin` section
 
 - `~/.old_config: @delete`
-  - deletes `~/.old_config` if it exists
+  - deletes `~/.old_config` if it exists; a directory needs `--force`, which
+    removes it recursively
 
 - `@include: bin default`
   - includes `bin` and `default`
@@ -228,7 +231,8 @@ options:
                         else the nearest MANIFEST walking up from the current
                         directory)
   --version             show program's version number and exit
-  -f, --force           allow clobbering files in target paths
+  -f, --force           allow clobbering files in target paths, and recursive
+                        removal of an @delete destination that is a directory
   --strict              treat skipped install/purge entries as failures
   -v, --verbose
   -d DIR, --dir DIR     override HOME and USERPROFILE (tilde expansion)

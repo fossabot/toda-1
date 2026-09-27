@@ -75,8 +75,13 @@ A source of `@delete` removes the destination if it exists:
 
 `@delete` entries are ignored by `reconcile` and `trace`, because they
 describe something to remove rather than a link to check. `install` performs
-the deletion. A destination that is a directory is reported as a failure
-rather than deleted.
+the deletion.
+
+A destination that is a directory is reported as a failure rather than
+deleted, unless `install` runs with `-f/--force`, which removes the directory
+and everything in it. A destination that plain removal can't touch because of
+its permissions is made writable and retried, also under `--force` only.
+Attributes set with `chflags`, such as `uchg`, still block removal.
 
 ## The `@include` macro
 

@@ -72,7 +72,10 @@ flags by action:
         "-f",
         "--force",
         action="store_true",
-        help="allow clobbering files in target paths",
+        help=(
+            "allow clobbering files in target paths, and recursive removal of "
+            "an @delete destination that is a directory"
+        ),
     )
     parser.add_argument(
         "--strict",
