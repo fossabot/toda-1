@@ -1,14 +1,16 @@
 """Tests for toda.model - Manifest parsing."""
 
+import contextlib
 import os
+
 import pytest
+
 from toda.errors import ManifestError, SectionNotFound
 from toda.model import (
+    IllegalSyntax,
     Manifest,
-    ManifestError,
     discover_manifest,
 )
-from toda.model import IllegalSyntax
 
 
 class TestManifestInit:
@@ -33,10 +35,8 @@ class TestManifestInit:
         """Manifest defaults to cwd for startdir."""
         # Change to temp_dir and create manifest
         old_cwd = temp_dir  # Use temp_dir as safe fallback
-        try:
+        with contextlib.suppress(FileNotFoundError):  # cwd could be deleted
             old_cwd = os.getcwd()
-        except FileNotFoundError:
-            pass  # cwd was deleted by previous test
         try:
             os.chdir(temp_dir)
             m = Manifest()
@@ -263,7 +263,10 @@ class TestManifestIterSection:
     def test_iter_with_include(self, manifest_file, temp_dir, source_file):
         src = source_file()
         src_basename = os.path.basename(src)
-        content = f"$base\n~/.base: {src_basename}\n$extended\n@include: base\n~/.ext: {src_basename}\n"
+        content = (
+            f"$base\n~/.base: {src_basename}\n"
+            f"$extended\n@include: base\n~/.ext: {src_basename}\n"
+        )
         path = manifest_file(content)
         m = Manifest(path=path, startdir=temp_dir)
         results = list(m.iter_section("extended"))
@@ -400,7 +403,7 @@ class TestManifestSourceResolution:
         try:
             os.chdir(other_dir)
             m = Manifest(path=path)
-            dest, resolved_src = next(m.iter_section("default"))
+            _dest, resolved_src = next(m.iter_section("default"))
         finally:
             os.chdir(old_cwd)
 

@@ -45,7 +45,7 @@ class Actions:
 
     def inspect(self) -> None:
         sections: list[dict[str, Any]] = []
-        for name in self.manifest.keys():
+        for name in self.manifest:
             includes: tuple[str, ...] = ()
             declarations: list[dict[str, str]] = []
             for dest, src in self.manifest[name].items():

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
 import sys
+from dataclasses import dataclass
 from os.path import dirname, isdir, islink, join, lexists, normpath
 from typing import TextIO
 

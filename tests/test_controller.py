@@ -1,10 +1,11 @@
 """Tests for toda.controller - Actions."""
 
+import contextlib
 import json
 import os
-import pytest
-from toda.model import Manifest
+
 from toda.controller import Actions
+from toda.model import Manifest
 
 
 class TestActionsInit:
@@ -22,13 +23,11 @@ class TestActionsInit:
         m = Manifest(startdir=temp_dir)
         # Should not raise on systems that support symlinks
         old_cwd = temp_dir  # Safe fallback
-        try:
+        with contextlib.suppress(FileNotFoundError):  # cwd could be deleted
             old_cwd = os.getcwd()
-        except FileNotFoundError:
-            pass  # cwd was deleted by previous test
         try:
             os.chdir(temp_dir)
-            actions = Actions(m, mock_args)
+            Actions(m, mock_args)
         finally:
             os.chdir(old_cwd)
 
@@ -36,7 +35,7 @@ class TestActionsInit:
         """Actions skips preflight when flag is set."""
         mock_args.no_preflight = True
         m = Manifest(startdir=temp_dir)
-        actions = Actions(m, mock_args)
+        Actions(m, mock_args)
         # Should not raise
 
 
@@ -63,8 +62,8 @@ class TestActionsInstall:
     def test_install_multiple_files(
         self, temp_dir, manifest_file, source_file, mock_args
     ):
-        src1 = source_file(content="content1", filename="src1.txt")
-        src2 = source_file(content="content2", filename="src2.txt")
+        source_file(content="content1", filename="src1.txt")
+        source_file(content="content2", filename="src2.txt")
         dest1 = os.path.join(temp_dir, "dest1")
         dest2 = os.path.join(temp_dir, "dest2")
         content = f"$default\n{dest1}: src1.txt\n{dest2}: src2.txt\n"
@@ -387,17 +386,15 @@ class TestAssertSymlinkWorks:
     def test_skips_with_no_preflight(self, mock_args, temp_dir):
         mock_args.no_preflight = True
         m = Manifest(startdir=temp_dir)
-        actions = Actions(m, mock_args)
+        Actions(m, mock_args)
         # Should not raise or do anything
 
     def test_creates_and_removes_test_symlink(self, temp_dir, mock_args):
         mock_args.no_preflight = False
         m = Manifest(startdir=temp_dir)
         old_cwd = temp_dir  # Safe fallback
-        try:
+        with contextlib.suppress(FileNotFoundError):  # cwd could be deleted
             old_cwd = os.getcwd()
-        except FileNotFoundError:
-            pass  # cwd was deleted by previous test
         try:
             os.chdir(temp_dir)
             Actions(m, mock_args)

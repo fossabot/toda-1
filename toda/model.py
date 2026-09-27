@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import logging
 import os
 import re
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass, field
 from os.path import abspath, dirname, exists, expanduser, join, normpath
-from typing import ClassVar, Iterable, Iterator, TextIO
+from typing import ClassVar, TextIO
 
 from .errors import ManifestError, SectionNotFound
 
@@ -98,16 +99,18 @@ class Manifest:
         if not self.path:
             return
         try:
-            fp = open(self.path, "r")
+            with open(self.path) as fp:
+                self._parse(fp)
         except OSError as e:
             raise ManifestError(
                 "cannot read manifest `{:}`: {:}".format(self.path, e)
             ) from None
-        with fp:
-            self._parse(fp)
 
     def __contains__(self, section_name: object) -> bool:
         return section_name in self.sections
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.sections)
 
     def __getitem__(self, section_name: str) -> Section:
         return self.sections[section_name]
@@ -200,8 +203,7 @@ class Manifest:
                 continue
             elif section is None or section_name is None:
                 raise IllegalSyntax(
-                    "line {:d}: target definition before "
-                    "section declaration".format(i)
+                    "line {:d}: target definition before section declaration".format(i)
                 )
 
             colon_indices = self._unprotected_colon_indices(line)
@@ -217,20 +219,19 @@ class Manifest:
 
             if dest in section:
                 raise IllegalSyntax(
-                    "line {:d}: target redefinition `{:}` "
-                    "in same section".format(i, dest)
+                    "line {:d}: target redefinition `{:}` in same section".format(
+                        i, dest
+                    )
                 )
 
-            if dest_is_macro:
-                if dest not in self.DEST_MACROS:
-                    raise IllegalSyntax("line {:d}: invalid {:}".format(i, dest))
+            if dest_is_macro and dest not in self.DEST_MACROS:
+                raise IllegalSyntax("line {:d}: invalid {:}".format(i, dest))
 
             resolved_src: str | tuple[str, ...] = src
             if dest == self.INCLUDE_MACRO:
                 resolved_src = self._parse_includes(src)
-            elif src_is_macro:
-                if src not in self.SRC_MACROS:
-                    raise IllegalSyntax("line {:d}: invalid {:}".format(i, src))
+            elif src_is_macro and src not in self.SRC_MACROS:
+                raise IllegalSyntax("line {:d}: invalid {:}".format(i, src))
 
             if not (dest_is_macro or src_is_macro):
                 has_glob = self._parse_part_terminal_glob(src)
@@ -316,7 +317,7 @@ class Manifest:
         from_include: bool = False,
     ) -> Iterator[ResolvedLink]:
         if section_name in active_stack:
-            cycle = " -> ".join(active_stack + (section_name,))
+            cycle = " -> ".join((*active_stack, section_name))
             raise ManifestError("include cycle detected: {:s}".format(cycle))
 
         if from_include:
@@ -324,7 +325,7 @@ class Manifest:
                 return
             expanded_includes.add(section_name)
 
-        stack = active_stack + (section_name,)
+        stack = (*active_stack, section_name)
         for dest, src in self.sections[section_name].items():
             if self._is_macro_or_parsed(dest):
                 if dest == self.INCLUDE_MACRO:
@@ -337,7 +338,7 @@ class Manifest:
                             )
                         for link in self._iter_section_provenance(
                             include_name,
-                            include_chain + (include_name,),
+                            (*include_chain, include_name),
                             stack,
                             expanded_includes,
                             from_include=True,
@@ -358,14 +359,13 @@ class Manifest:
             )
         if included is None:
             included = set()
-        for link in self._iter_section_provenance(
+        yield from self._iter_section_provenance(
             section_name,
             include_chain=(section_name,),
             active_stack=tuple(),
             expanded_includes=included,
             from_include=False,
-        ):
-            yield link
+        )
 
     def iter_section(
         self, section_name: str, included: set[str] | None = None

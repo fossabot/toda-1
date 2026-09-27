@@ -1,12 +1,12 @@
-import os
 import argparse
 import logging
+import os
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
+from .controller import Actions
 from .errors import SectionNotFound, TodaError
 from .model import Manifest, discover_manifest
-from .controller import Actions
 
 log = logging.getLogger("toda")
 
@@ -25,7 +25,7 @@ def main() -> int | None:
   purge       remove destination paths defined by manifest sections
   inspect     print section include relationships
   trace       show resolved link provenance (declaration source + include chain)
-  reconcile   diff expected links vs filesystem state (exit 0 clean, 2 drift/conflict, 1 error)
+  reconcile   diff expected links vs filesystem (exit 0 clean, 2 drift, 1 error)
   help        show this help message and exit
 
 flags by action:
