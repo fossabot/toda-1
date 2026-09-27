@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/hgto/toda/actions/workflows/ci.yml/badge.svg)](https://github.com/hgto/toda/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/hgto/toda/branch/develop/graph/badge.svg)](https://codecov.io/gh/hgto/toda)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fhgto%2Ftoda.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fhgto%2Ftoda?ref=badge_shield)
 
 Toda ([תודה](https://en.wiktionary.org/wiki/%D7%AA%D7%95%D7%93%D7%94)) deploys
 your dotfiles as symlinks, tells you exactly where each link came from, and
@@ -259,3 +260,6 @@ welcome.
 ## License
 
 MPL-2.0. See [LICENSE](LICENSE).
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fhgto%2Ftoda.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fhgto%2Ftoda?ref=badge_large)
