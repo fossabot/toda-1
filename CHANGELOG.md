@@ -16,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `docs/json-schema.md`.
 - An example dotfiles repo under `examples/dotfiles`, exercised by the test
   suite.
+- `install --force` deletes an `@delete` destination that is a directory,
+  removing the whole tree. A destination that plain removal can't touch
+  because of its permissions is made writable and retried, also under
+  `--force`. `chflags` attributes such as `uchg` are not cleared.
 
 ### Changed
 

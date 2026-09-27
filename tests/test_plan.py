@@ -8,6 +8,7 @@ from toda.model import Manifest
 from toda.plan import (
     OP_CREATE,
     OP_NOOP,
+    OP_REMOVE,
     OP_REPLACE,
     OP_SKIP,
     apply,
@@ -19,6 +20,23 @@ from toda.plan import (
 def _manifest(manifest_file, temp_dir, content):
     path = manifest_file(content)
     return Manifest(path=path, startdir=temp_dir)
+
+
+def _readonly_dir(temp_dir, entry, name="locked_dir"):
+    """A directory holding `entry` but with no write bit, so the entry can't
+    be unlinked until the directory is made writable again."""
+    path = os.path.join(temp_dir, name)
+    os.makedirs(path, exist_ok=True)
+    with open(os.path.join(path, entry), "w") as f:
+        f.write("gone")
+    os.chmod(path, 0o500)
+    return path
+
+
+def _restore_writable(path):
+    """Undo a read-only bit so tmp_path teardown can clean up."""
+    if os.path.lexists(path):
+        os.chmod(path, 0o700)
 
 
 class TestBuildPlanInstall:
@@ -91,6 +109,47 @@ class TestBuildPlanInstall:
 
         assert [op.action for op in plan.operations] == [OP_REPLACE]
 
+    def test_delete_directory_with_force_plans_recursive_removal(
+        self, temp_dir, manifest_file
+    ):
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(dest)
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        plan = build_plan(m, ["default"], "install", force=True)
+
+        op = plan.operations[0]
+        assert op.action == OP_REMOVE
+        assert op.actual_kind == "directory"
+        assert op.force is True
+        assert "recursive" in op.reason
+
+    def test_delete_directory_without_force_plans_refusal(
+        self, temp_dir, manifest_file
+    ):
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(dest)
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        plan = build_plan(m, ["default"], "install", force=True)
+        assert plan.operations[0].force is True
+
+        plan = build_plan(m, ["default"], "install", force=False)
+        assert plan.operations[0].force is False
+        assert plan.operations[0].reason == "cannot delete a directory"
+
+    def test_delete_top_level_directory_refuses_even_with_force(
+        self, temp_dir, manifest_file
+    ):
+        m = _manifest(manifest_file, temp_dir, "$default\n~: @delete\n")
+
+        plan = build_plan(m, ["default"], "install", force=True)
+
+        op = plan.operations[0]
+        assert op.action == OP_REMOVE
+        assert op.force is False
+        assert op.reason == "cannot delete a directory"
+
 
 class TestRenderPlanText:
     def test_render_includes_dest_and_src(self, temp_dir, manifest_file, source_file):
@@ -106,6 +165,19 @@ class TestRenderPlanText:
         assert "would link" in text
         assert dest in text
         assert src in text
+
+    def test_render_marks_forced_recursive_delete(self, temp_dir, manifest_file):
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(dest)
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        text = render_plan_text(build_plan(m, ["default"], "install", force=True))
+        assert "would remove" in text
+        assert dest in text
+        assert "recursive delete (--force)" in text
+
+        text = render_plan_text(build_plan(m, ["default"], "install", force=False))
+        assert "cannot delete a directory" in text
 
 
 class TestApplyInstall:
@@ -233,6 +305,60 @@ class TestApplyInstall:
         m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
 
         assert apply(build_plan(m, ["default"], "install")) == 0
+        assert not os.path.lexists(dest)
+
+    def test_delete_macro_directory_with_force_removes_tree(
+        self, temp_dir, manifest_file
+    ):
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(os.path.join(dest, "sub"))
+        with open(os.path.join(dest, "sub", "child.txt"), "w") as f:
+            f.write("child")
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        assert apply(build_plan(m, ["default"], "install", force=True)) == 0
+        assert not os.path.lexists(dest)
+
+    def test_delete_macro_in_unwritable_directory_with_force(
+        self, temp_dir, manifest_file
+    ):
+        parent = _readonly_dir(temp_dir, "gone")
+        dest = os.path.join(parent, "gone")
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        try:
+            assert apply(build_plan(m, ["default"], "install", force=True)) == 0
+        finally:
+            os.chmod(parent, 0o700)
+        assert not os.path.lexists(dest)
+
+    def test_delete_macro_in_unwritable_directory_without_force_fails(
+        self, temp_dir, manifest_file
+    ):
+        parent = _readonly_dir(temp_dir, "gone")
+        dest = os.path.join(parent, "gone")
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        try:
+            assert apply(build_plan(m, ["default"], "install")) == 1
+            assert os.path.lexists(dest)
+        finally:
+            os.chmod(parent, 0o700)
+
+    def test_delete_macro_unwritable_tree_with_force(self, temp_dir, manifest_file):
+        dest = os.path.join(temp_dir, "adir")
+        sub = os.path.join(dest, "sub")
+        os.makedirs(sub)
+        with open(os.path.join(sub, "child.txt"), "w") as f:
+            f.write("child")
+        os.chmod(sub, 0o500)
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        try:
+            assert apply(build_plan(m, ["default"], "install", force=True)) == 0
+        finally:
+            _restore_writable(dest)
+            _restore_writable(sub)
         assert not os.path.lexists(dest)
 
 

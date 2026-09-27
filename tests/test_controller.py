@@ -108,6 +108,38 @@ class TestActionsInstall:
 
         assert actions.install() == 1
 
+    def test_install_force_deletes_directory_tree(
+        self, temp_dir, manifest_file, mock_args
+    ):
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(os.path.join(dest, "sub"))
+        with open(os.path.join(dest, "sub", "child.txt"), "w") as f:
+            f.write("child")
+        content = f"$default\n{dest}: @delete\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = True
+
+        assert Actions(m, mock_args).install() == 0
+        assert not os.path.lexists(dest)
+
+    def test_install_without_force_refuses_directory_delete(
+        self, temp_dir, manifest_file, mock_args
+    ):
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(dest)
+        content = f"$default\n{dest}: @delete\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+
+        assert Actions(m, mock_args).install() == 1
+        assert os.path.isdir(dest)
+
     def test_install_skip_is_not_a_failure_by_default(
         self, temp_dir, manifest_file, source_file, mock_args
     ):
