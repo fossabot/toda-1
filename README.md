@@ -3,7 +3,7 @@
 # Toda
 
 [![CI](https://github.com/hgto/toda/actions/workflows/ci.yml/badge.svg)](https://github.com/hgto/toda/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/hgto/toda/branch/main/graph/badge.svg)](https://codecov.io/gh/hgto/toda)
+[![codecov](https://codecov.io/gh/hgto/toda/branch/develop/graph/badge.svg)](https://codecov.io/gh/hgto/toda)
 
 Toda ([תודה](https://en.wiktionary.org/wiki/%D7%AA%D7%95%D7%93%D7%94)) gives you
 the power to safely deploy files using symlinks on any

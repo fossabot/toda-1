@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=69", "setuptools_scm[toml]>=8"]
+requires = ["setuptools>=77", "setuptools_scm[toml]>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,8 @@ name = "toda"
 dynamic = ["version"]
 description = "Toda gives you the power to safely deploy files using symlinks on any operating system with Python installed."
 readme = "README.md"
-license = { text = "MPL-2.0" }
+license = "MPL-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "hgto", email = "77352283+hgto@users.noreply.github.com" }]
 keywords = ["dotfiles", "symlink", "environment"]
 classifiers = [
@@ -24,7 +25,6 @@ classifiers = [
     "Operating System :: Unix",
     "Operating System :: MacOS",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)",
     "Intended Audience :: System Administrators",
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
