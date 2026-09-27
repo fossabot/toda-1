@@ -1,8 +1,9 @@
 """Tests for toda CLI argument parsing."""
 
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestCLIArgumentParsing:
@@ -250,12 +251,11 @@ class TestCLIArgumentParsing:
             mock_args.section = []
             mock_parse.return_value = mock_args
 
-            with patch("toda.__main__.Actions"):
-                with patch.dict(os.environ, {}, clear=False):
-                    main()
+            with patch("toda.__main__.Actions"), patch.dict(os.environ):
+                main()
 
-                    assert os.environ["HOME"] == "/custom/home"
-                    assert os.environ["USERPROFILE"] == "/custom/home"
+                assert os.environ["HOME"] == "/custom/home"
+                assert os.environ["USERPROFILE"] == "/custom/home"
 
     def test_dry_run_leaves_filesystem_untouched(self, temp_dir, capsys):
         """--dry-run prints the plan and never creates the link."""
@@ -311,10 +311,12 @@ class TestCLIArgumentParsing:
         """'help' action prints full help without loading a manifest."""
         from toda.__main__ import main
 
-        with patch("sys.argv", ["toda", "help"]):
-            with patch("toda.__main__.Manifest") as mock_manifest:
-                assert main() == 0
-                mock_manifest.assert_not_called()
+        with (
+            patch("sys.argv", ["toda", "help"]),
+            patch("toda.__main__.Manifest") as mock_manifest,
+        ):
+            assert main() == 0
+            mock_manifest.assert_not_called()
 
         out = capsys.readouterr().out
         assert "usage: toda" in out
@@ -357,9 +359,11 @@ class TestVersionFlag:
     def test_version_flag(self, capsys):
         from toda.__main__ import main
 
-        with patch("sys.argv", ["toda", "--version"]):
-            with pytest.raises(SystemExit) as exc:
-                main()
+        with (
+            patch("sys.argv", ["toda", "--version"]),
+            pytest.raises(SystemExit) as exc,
+        ):
+            main()
 
         assert exc.value.code == 0
         assert clean_version_output(capsys.readouterr().out)

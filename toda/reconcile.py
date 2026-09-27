@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
 import sys
+from dataclasses import dataclass
 from os.path import dirname, isdir, islink, join, lexists, normpath
 from typing import TextIO
 
@@ -48,16 +48,35 @@ class ReconcileResult:
         return any(entry.status != STATUS_OK for entry in self.entries)
 
 
+def _strip_extended_prefix(path: str) -> str:
+    r"""Drop the extended-length prefix Windows adds to some paths.
+
+    `os.readlink` returns `\\?\C:\...` for a link aimed at an absolute path
+    while a manifest source is written `C:\...`, so without this every correct
+    link would compare unequal and read as `wrong_target`.
+    """
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    if path.startswith("\\\\?\\") or path.startswith("\\??\\"):
+        return path[4:]
+    return path
+
+
 def _normalize_target(dest: str, target: str) -> str:
+    target = _strip_extended_prefix(target)
     if os.path.isabs(target):
         return normpath(target)
     return normpath(join(dirname(dest), target))
 
 
 def _same_target(actual_target: str, expected_src: str) -> bool:
-    if normpath(actual_target) == normpath(expected_src):
+    actual = normpath(_strip_extended_prefix(actual_target))
+    expected = normpath(_strip_extended_prefix(expected_src))
+    if os.path.normcase(actual) == os.path.normcase(expected):
         return True
-    return os.path.realpath(actual_target) == os.path.realpath(expected_src)
+    return os.path.normcase(os.path.realpath(actual)) == os.path.normcase(
+        os.path.realpath(expected)
+    )
 
 
 def _collect_records(

@@ -5,65 +5,128 @@
 [![CI](https://github.com/hgto/toda/actions/workflows/ci.yml/badge.svg)](https://github.com/hgto/toda/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/hgto/toda/branch/develop/graph/badge.svg)](https://codecov.io/gh/hgto/toda)
 
-Toda ([תודה](https://en.wiktionary.org/wiki/%D7%AA%D7%95%D7%93%D7%94)) gives you
-the power to safely deploy files using symlinks on any
-operating system with Python installed.
+Toda ([תודה](https://en.wiktionary.org/wiki/%D7%AA%D7%95%D7%93%D7%94)) deploys
+your dotfiles as symlinks, tells you exactly where each link came from, and
+reports when your system has drifted. Pure Python, no dependencies.
 
-Toda requires only core Python, supporting versions 3.10+. Toda has
-multi-platform support for POSIX-compliant systems, Linux (Debian, Ubuntu, etc),
-Windows, macOS and BSDs in that order of priority.
-
-On Windows, creating symlinks requires either Developer Mode or administrator
-rights.
-
-## `toda`
+```console
+$ toda reconcile
+- missing        /home/me/.vimrc expected=/home/me/dotfiles/vimrc
+! wrong_target   /home/me/.config/git/config expected=/home/me/dotfiles/gitconfig actual=/home/me/old-config
+totals ok=12 missing=1 wrong_target=1 overwritten_file=0 overwritten_dir=0 manifest_conflict=0
 ```
-usage: toda [-h] [-n] [-m MANIFEST] [--version] [-f] [--strict] [-v] [-d DIR]
-            [--no-preflight] [--format {text,json}]
-            [--color {auto,always,never}] [--only-changed]
-            [{install,purge,inspect,trace,reconcile,help}] [section ...]
 
-creates symlinks described by a manifest
+## Why toda
 
-positional arguments:
-  {install,purge,inspect,trace,reconcile,help}
-                        action to run (default: inspect)
-  section               manifest target
+Most dotfile managers tell you how to make links. Toda also tells you whether
+they are still right, and where each one came from.
 
-options:
-  -h, --help            show this help message and exit
-  -n, --dry-run         print the plan for install/purge without touching the
-                        filesystem
-  -m MANIFEST, --manifest MANIFEST
-                        path to custom manifest file (default: $TODA_MANIFEST,
-                        else the nearest MANIFEST walking up from the current
-                        directory)
-  --version             show program's version number and exit
-  -f, --force           allow clobbering files in target paths
-  --strict              treat skipped install/purge entries as failures
-  -v, --verbose
-  -d DIR, --dir DIR     override HOME and USERPROFILE (tilde expansion)
-  --no-preflight        skip the preflight sanity checks
-  --format {text,json}  output format for trace/reconcile actions
-  --color {auto,always,never}
-                        color mode for text output
-  --only-changed        for reconcile text output, hide entries with status=ok
+| | toda | GNU Stow | dotbot | chezmoi |
+| --- | --- | --- | --- | --- |
+| Runtime dependencies | none (core Python) | Perl | Python | Go binary |
+| Links files by | manifest | directory tree | config directives | file contents |
+| Drift / diff report | yes (`reconcile`) | no | no | yes (`diff`) |
+| Link provenance | yes (`trace`) | no | no | partial |
+| Templating and secrets | no | no | no | yes |
+| Windows | yes | no | yes | yes |
 
-actions:
-  install     create links from manifest sections
-  purge       remove destination paths defined by manifest sections
-  inspect     print section include relationships
-  trace       show resolved link provenance (declaration source + include chain)
-  reconcile   diff expected links vs filesystem state (exit 0 clean, 2 drift/conflict, 1 error)
-  help        show this help message and exit
+Choose toda when you want a small, auditable symlink layer with a machine
+readable status report. Choose chezmoi when you need templating, secrets and
+file contents managed across many machines.
 
-flags by action:
-  install/purge    -n/--dry-run, -f/--force, --strict, --no-preflight
-  inspect          --format
-  trace            --format
-  reconcile        --format, --color, --only-changed, --no-preflight
-  all              -m/--manifest, -d/--dir, -v
+## Install
+
+```console
+uv tool install toda     # or: pipx install toda
 ```
+
+Toda requires Python 3.10 or newer. It supports Linux, macOS, the BSDs and
+Windows.
+
+On Windows, creating symlinks requires Developer Mode or administrator rights.
+Toda checks this before it changes anything and refuses to run when symlinks
+are unavailable.
+
+## Quickstart
+
+Put your dotfiles in a repo next to a `MANIFEST`:
+
+```console
+dotfiles/
+├── MANIFEST
+├── gitconfig
+└── vimrc
+```
+
+```
+$default
+~/.vimrc: vimrc
+~/.config/git/config: gitconfig
+```
+
+Then:
+
+```console
+$ toda install --dry-run      # see the plan, change nothing
+would link /home/me/.vimrc -> /home/me/dotfiles/vimrc
+would link /home/me/.config/git/config -> /home/me/dotfiles/gitconfig
+
+$ toda install                # do it
+$ toda reconcile              # is the system still correct?
+```
+
+Sources are relative to the directory holding the manifest, so the commands
+work from any working directory, and the same manifest works on every machine.
+
+## Actions
+
+```
+install     create links from manifest sections
+purge       remove destination paths defined by manifest sections
+inspect     print section include relationships
+trace       show resolved link provenance (declaration source + include chain)
+reconcile   diff expected links vs filesystem (exit 0 clean, 2 drift, 1 error)
+help        show this help message and exit
+```
+
+`install` and `purge` accept `-n/--dry-run`, which prints the plan instead of
+applying it, and `-f/--force`, which replaces an existing file or directory
+after moving it aside to `<dest>.toda-backup`.
+
+`purge` removes only symlinks toda owns, meaning links pointing at the
+expected source. A regular file that happens to sit at a manifest destination
+is reported and left alone.
+
+### Exit codes
+
+| code | meaning |
+| --- | --- |
+| 0 | success; for `reconcile`, no drift |
+| 1 | operational failure, or a skipped entry under `--strict` |
+| 2 | `reconcile` found drift or a manifest conflict |
+
+## `MANIFEST` file syntax
+
+- `~/bin/destination_link: ./section/source_file`
+  - destination-to-source mapping, with the two arguments delimited by a colon
+
+- `$ bin`
+  - defines the `bin` section
+
+- `~/.old_config: @delete`
+  - deletes `~/.old_config` if it exists
+
+- `@include: bin default`
+  - includes `bin` and `default`
+  - includes are resolved recursively in deterministic order and each included
+    section is processed once
+
+- `~/.config/: config/*`
+  - links every entry of a source directory into a destination directory; the
+    destination must end in `/`
+
+See [docs/manifest.md](docs/manifest.md) for the full grammar and its edge
+cases.
 
 ## Manifest discovery
 
@@ -97,40 +160,19 @@ positions:
 ~/note: C:\Users\me\notes.txt
 ```
 
-## `MANIFEST` file syntax
-
-- `~/bin/destination_link: ./section/source_file`
-  - destination-to-source mapping, with the two arguments delimited by a colon
-
-- `$ bin`
-  - defines the `bin` section
-
-- `~/.old_config: @delete`
-  - deletes `~/.old_config` if it exists
-
-- `@include: bin default`
-  - includes `bin` and `default`
-  - includes are resolved recursively in deterministic order and each included
-    section is processed once
-
 ## Provenance (`trace`)
 
 `trace` shows where each resolved link came from in the manifest:
 
-```bash
-toda trace default
-```
-
-Example text output:
-
-```text
+```console
+$ toda trace default
 /Users/me/.config/git/config <- /repo/dotfiles/gitconfig [section=base line=12 chain=default -> base]
 ```
 
 Use JSON for tooling:
 
-```bash
-toda trace --format json default
+```console
+$ toda trace --format json default
 ```
 
 ## Reconciliation (`reconcile`)
@@ -150,27 +192,70 @@ Statuses:
 
 Examples:
 
-```bash
-toda reconcile --only-changed default
-toda reconcile --format json default
-toda reconcile --color never default
+```console
+$ toda reconcile --only-changed default
+$ toda reconcile --format json default
+$ toda reconcile --color never default
 ```
-
-`reconcile` exit codes:
-
-- `0`: all links are `ok`
-- `2`: drift/conflicts detected
-- `1`: operational failure
 
 ## JSON output
 
 `trace`, `reconcile` and `inspect --format json` emit a document with a
 `schema_version` field, currently `1`. Pin against it when consuming the
-output from other tools.
+output from other tools. See [docs/json-schema.md](docs/json-schema.md).
 
-## CI Example
+## CLI reference
 
-```bash
-toda install --manifest ./MANIFEST --no-preflight default
-toda reconcile --manifest ./MANIFEST --format json --color never default
 ```
+usage: toda [-h] [-n] [-m MANIFEST] [--version] [-f] [--strict] [-v] [-d DIR]
+            [--no-preflight] [--format {text,json}]
+            [--color {auto,always,never}] [--only-changed]
+            [{install,purge,inspect,trace,reconcile,help}] [section ...]
+
+creates symlinks described by a manifest
+
+positional arguments:
+  {install,purge,inspect,trace,reconcile,help}
+                        action to run (default: inspect)
+  section               manifest target
+
+options:
+  -h, --help            show this help message and exit
+  -n, --dry-run         print the plan for install/purge without touching the
+                        filesystem
+  -m MANIFEST, --manifest MANIFEST
+                        path to custom manifest file (default: $TODA_MANIFEST,
+                        else the nearest MANIFEST walking up from the current
+                        directory)
+  --version             show program's version number and exit
+  -f, --force           allow clobbering files in target paths
+  --strict              treat skipped install/purge entries as failures
+  -v, --verbose
+  -d DIR, --dir DIR     override HOME and USERPROFILE (tilde expansion)
+  --no-preflight        skip the preflight sanity checks
+  --format {text,json}  output format for trace/reconcile actions
+  --color {auto,always,never}
+                        color mode for text output
+  --only-changed        for reconcile text output, hide entries with status=ok
+```
+
+## CI example
+
+Fail a build when a machine has drifted from its dotfiles:
+
+```yaml
+- run: toda install --manifest ./MANIFEST --no-preflight default
+- run: toda reconcile --manifest ./MANIFEST --format json --color never default
+```
+
+`toda reconcile` exits 2 when links are missing or wrong, so this step fails
+the job. See [examples/dotfiles](examples/dotfiles) for a complete repo.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and pull requests are
+welcome.
+
+## License
+
+MPL-2.0. See [LICENSE](LICENSE).

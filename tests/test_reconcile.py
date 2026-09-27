@@ -2,6 +2,8 @@
 
 import os
 
+import pytest
+
 from toda.model import Manifest
 from toda.reconcile import (
     STATUS_MANIFEST_CONFLICT,
@@ -10,6 +12,8 @@ from toda.reconcile import (
     STATUS_OVERWRITTEN_DIR,
     STATUS_OVERWRITTEN_FILE,
     STATUS_WRONG_TARGET,
+    _same_target,
+    _strip_extended_prefix,
     reconcile_manifest,
 )
 
@@ -93,3 +97,23 @@ class TestReconcileStatuses:
 
         result = reconcile_manifest(manifest, ["s1", "s2"])
         assert result.entries[0].status == STATUS_MANIFEST_CONFLICT
+
+
+class TestWindowsExtendedPaths:
+    r"""Windows readlink returns `\\?\C:\...` for absolute targets."""
+
+    def test_strips_drive_prefix(self):
+        assert _strip_extended_prefix(r"\\?\C:\x\y") == r"C:\x\y"
+
+    def test_strips_unc_prefix(self):
+        assert _strip_extended_prefix(r"\\?\UNC\srv\share") == r"\\srv\share"
+
+    def test_leaves_ordinary_paths_alone(self):
+        assert _strip_extended_prefix("/home/me/.vimrc") == "/home/me/.vimrc"
+
+    def test_same_target_ignores_the_prefix(self):
+        assert _same_target(r"\\?\C:\x\y", r"C:\x\y")
+
+    @pytest.mark.skipif(os.name != "nt", reason="normcase is a no-op off Windows")
+    def test_same_target_ignores_case(self):
+        assert _same_target(r"C:\X\Y", r"c:\x\y")

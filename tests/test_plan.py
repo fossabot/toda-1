@@ -3,11 +3,11 @@
 import os
 
 import pytest
+
 from toda.model import Manifest
 from toda.plan import (
     OP_CREATE,
     OP_NOOP,
-    OP_REMOVE,
     OP_REPLACE,
     OP_SKIP,
     apply,
@@ -47,8 +47,8 @@ class TestBuildPlanInstall:
         assert [op.action for op in plan.operations] == [OP_NOOP]
 
     def test_conflicting_sources_is_skip(self, temp_dir, manifest_file, source_file):
-        src1 = source_file(filename="one.txt")
-        src2 = source_file(content="two", filename="two.txt")
+        source_file(filename="one.txt")
+        source_file(content="two", filename="two.txt")
         dest = os.path.join(temp_dir, "dest")
         m = _manifest(
             manifest_file,
@@ -119,7 +119,7 @@ class TestApplyInstall:
         assert apply(build_plan(m, ["default"], "install")) == 0
 
         assert os.path.islink(dest)
-        assert os.readlink(dest) == src
+        assert os.path.samefile(dest, src)
 
     def test_source_missing_is_a_failure(self, temp_dir, manifest_file):
         dest = os.path.join(temp_dir, "link")
@@ -198,7 +198,7 @@ class TestApplyInstall:
 
         apply(build_plan(m, ["default"], "install", force=True))
 
-        assert os.readlink(dest) == src2
+        assert os.path.samefile(dest, src2)
         assert not os.path.exists(dest + ".toda-backup")
 
     def test_delete_macro_removes_file(self, temp_dir, manifest_file):
@@ -291,7 +291,7 @@ class TestApplyPurge:
     def test_removes_wrong_target_symlink_with_force(
         self, temp_dir, manifest_file, source_file
     ):
-        expected = source_file(filename="expected.txt")
+        source_file(filename="expected.txt")
         other = source_file(content="other", filename="other.txt")
         dest = os.path.join(temp_dir, "link")
         os.symlink(other, dest)

@@ -1,10 +1,12 @@
 """Integration tests for toda package."""
 
 import os
+
 import pytest
+
+from toda.controller import Actions
 from toda.errors import ManifestError
 from toda.model import Manifest
-from toda.controller import Actions
 
 
 class TestIntegrationInstallPurge:
@@ -15,8 +17,8 @@ class TestIntegrationInstallPurge:
     ):
         """Complete install workflow creates expected symlinks."""
         # Create source files
-        src1 = source_file(content="config1", filename="config1.txt")
-        src2 = source_file(content="config2", filename="config2.txt")
+        source_file(content="config1", filename="config1.txt")
+        source_file(content="config2", filename="config2.txt")
 
         # Create destinations within temp_dir to avoid touching home
         dest1 = os.path.join(temp_dir, "installed", "config1")
@@ -63,8 +65,8 @@ class TestIntegrationInstallPurge:
 
     def test_include_inheritance(self, temp_dir, manifest_file, source_file, mock_args):
         """Sections with @include inherit files from other sections."""
-        src_base = source_file(content="base config", filename="base.conf")
-        src_extra = source_file(content="extra config", filename="extra.conf")
+        source_file(content="base config", filename="base.conf")
+        source_file(content="extra config", filename="extra.conf")
 
         dest_base = os.path.join(temp_dir, "installed", "base.conf")
         dest_extra = os.path.join(temp_dir, "installed", "extra.conf")
@@ -90,7 +92,7 @@ $full
 
     def test_glob_expansion(self, temp_dir, manifest_file, source_dir, mock_args):
         """Glob patterns expand to all matching files."""
-        srcdir = source_dir(
+        source_dir(
             dirname="dotfiles",
             files={
                 "bashrc": "bash config",
