@@ -6,9 +6,9 @@ import sys
 import tempfile
 from os import symlink
 from os.path import join
-from pprint import pprint
 from typing import Any
 
+from . import SCHEMA_VERSION
 from .errors import DeployError
 from .model import Manifest
 from .plan import apply, build_plan, render_plan_text
@@ -44,16 +44,41 @@ class Actions:
         return apply(plan, strict=getattr(self.args, "strict", False))
 
     def inspect(self) -> None:
-        print("inspecting...")
-        pprint(
-            dict(
-                (
-                    key,
-                    self.manifest[key].get(Manifest.INCLUDE_MACRO, None),
-                )
-                for key in self.manifest.keys()
+        sections: list[dict[str, Any]] = []
+        for name in self.manifest.keys():
+            includes: tuple[str, ...] = ()
+            declarations: list[dict[str, str]] = []
+            for dest, src in self.manifest[name].items():
+                if dest == Manifest.INCLUDE_MACRO:
+                    assert isinstance(src, tuple)
+                    includes = src
+                else:
+                    assert isinstance(src, str)
+                    declarations.append({"dest": dest, "src": src})
+            sections.append(
+                {"name": name, "includes": list(includes), "declarations": declarations}
             )
-        )
+
+        if self.args.format == "json":
+            print(
+                json.dumps(
+                    {"schema_version": SCHEMA_VERSION, "sections": sections},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+
+        for section in sections:
+            print("${:s}".format(section["name"]))
+            if section["includes"]:
+                print("  @include: {:s}".format(" ".join(section["includes"])))
+            for declaration in section["declarations"]:
+                print(
+                    "  {dest}: {src}".format(
+                        dest=declaration["dest"], src=declaration["src"]
+                    )
+                )
 
     @staticmethod
     def _serialize_trace_entry(entry: Any) -> dict[str, Any]:
@@ -77,7 +102,10 @@ class Actions:
                 records.append(entry)
 
         if self.args.format == "json":
-            payload = [self._serialize_trace_entry(entry) for entry in records]
+            payload = {
+                "schema_version": SCHEMA_VERSION,
+                "entries": [self._serialize_trace_entry(entry) for entry in records],
+            }
             print(json.dumps(payload, indent=2, sort_keys=True))
             return
 

@@ -303,7 +303,9 @@ class TestCLIArgumentParsing:
             assert main() == 1
 
         err = capsys.readouterr().err
-        assert err.strip() == "toda: error: section `nonexistent` is not in the manifest"
+        assert (
+            err.strip() == "toda: error: section `nonexistent` is not in the manifest"
+        )
 
     def test_help_action_prints_help(self, capsys):
         """'help' action prints full help without loading a manifest."""
@@ -347,3 +349,22 @@ class TestCLIArgumentParsing:
                     main()
 
                 assert exc.value.code == 1
+
+
+class TestVersionFlag:
+    """--version prints the installed version and exits 0."""
+
+    def test_version_flag(self, capsys):
+        from toda.__main__ import main
+
+        with patch("sys.argv", ["toda", "--version"]):
+            with pytest.raises(SystemExit) as exc:
+                main()
+
+        assert exc.value.code == 0
+        assert clean_version_output(capsys.readouterr().out)
+
+
+def clean_version_output(out: str) -> bool:
+    out = out.strip()
+    return out.startswith("toda ") and len(out) > len("toda ")

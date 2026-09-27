@@ -128,7 +128,9 @@ class TestApplyInstall:
         assert apply(build_plan(m, ["default"], "install")) == 1
         assert not os.path.lexists(dest)
 
-    def test_backup_on_force_for_regular_file(self, temp_dir, manifest_file, source_file):
+    def test_backup_on_force_for_regular_file(
+        self, temp_dir, manifest_file, source_file
+    ):
         src = source_file(content="new")
         dest = os.path.join(temp_dir, "existing")
         with open(dest, "w") as f:
