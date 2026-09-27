@@ -30,10 +30,6 @@ they are still right, and where each one came from.
 | Templating and secrets | no | no | no | yes |
 | Windows | yes | no | yes | yes |
 
-Choose toda when you want a small, auditable symlink layer with a machine
-readable status report. Choose chezmoi when you need templating, secrets and
-file contents managed across many machines.
-
 ## Install
 
 ```console
