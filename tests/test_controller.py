@@ -337,9 +337,7 @@ class TestActionsPurge:
 
         assert actions.purge() == 1
 
-    def test_purge_skips_delete_macro_entries(
-        self, temp_dir, manifest_file, mock_args
-    ):
+    def test_purge_skips_delete_macro_entries(self, temp_dir, manifest_file, mock_args):
         dest = os.path.join(temp_dir, "gone")
         with open(dest, "w") as f:
             f.write("keep me")
@@ -366,7 +364,9 @@ class TestActionsInspect:
         actions.inspect()
 
         captured = capsys.readouterr()
-        assert "inspecting" in captured.out
+        assert "$default" in captured.out
+        assert "~/.test: source" in captured.out
+        assert "@include: default" in captured.out
 
     def test_inspect_shows_includes(self, manifest_file, mock_args, capsys, temp_dir):
         content = "$base\n~/.base: base\n$extended\n@include: base\n"
@@ -409,7 +409,9 @@ class TestAssertSymlinkWorks:
 class TestActionsTrace:
     """Test Actions.trace method."""
 
-    def test_trace_text_output(self, temp_dir, manifest_file, source_file, mock_args, capsys):
+    def test_trace_text_output(
+        self, temp_dir, manifest_file, source_file, mock_args, capsys
+    ):
         src = source_file(content="trace", filename="source.txt")
         src_basename = os.path.basename(src)
         content = (
@@ -429,7 +431,9 @@ class TestActionsTrace:
         assert "section=base" in captured.out
         assert "chain=default -> base" in captured.out
 
-    def test_trace_json_output(self, temp_dir, manifest_file, source_file, mock_args, capsys):
+    def test_trace_json_output(
+        self, temp_dir, manifest_file, source_file, mock_args, capsys
+    ):
         src = source_file(content="trace", filename="source.txt")
         src_basename = os.path.basename(src)
         content = f"$default\n~/.default: {src_basename}\n"
@@ -443,8 +447,9 @@ class TestActionsTrace:
         actions.trace()
 
         payload = json.loads(capsys.readouterr().out)
-        assert payload[0]["declared_section"] == "default"
-        assert payload[0]["raw_declaration"] == "~/.default: source.txt"
+        assert payload["schema_version"] == 1
+        assert payload["entries"][0]["declared_section"] == "default"
+        assert payload["entries"][0]["raw_declaration"] == "~/.default: source.txt"
 
     def test_trace_skips_delete_macro(self, temp_dir, manifest_file, mock_args, capsys):
         dest = os.path.join(temp_dir, "gone")
@@ -458,13 +463,16 @@ class TestActionsTrace:
 
         actions.trace()
         payload = json.loads(capsys.readouterr().out)
-        assert payload == []
+        assert payload["schema_version"] == 1
+        assert payload["entries"] == []
 
 
 class TestActionsReconcile:
     """Test Actions.reconcile method."""
 
-    def test_reconcile_outputs_statuses(self, temp_dir, manifest_file, source_file, mock_args, capsys):
+    def test_reconcile_outputs_statuses(
+        self, temp_dir, manifest_file, source_file, mock_args, capsys
+    ):
         src = source_file(content="reconcile", filename="source.txt")
         src_basename = os.path.basename(src)
         dest = os.path.join(temp_dir, "dest")
@@ -482,7 +490,9 @@ class TestActionsReconcile:
         assert "missing" in captured.out
         assert dest in captured.out
 
-    def test_reconcile_exit_code_for_drift(self, temp_dir, manifest_file, source_file, mock_args):
+    def test_reconcile_exit_code_for_drift(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
         src = source_file(content="reconcile", filename="source.txt")
         src_basename = os.path.basename(src)
         dest = os.path.join(temp_dir, "dest")
@@ -497,7 +507,9 @@ class TestActionsReconcile:
 
         assert actions.reconcile() == 2
 
-    def test_reconcile_exit_code_for_clean_state(self, temp_dir, manifest_file, source_file, mock_args):
+    def test_reconcile_exit_code_for_clean_state(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
         src = source_file(content="reconcile", filename="source.txt")
         src_basename = os.path.basename(src)
         dest = os.path.join(temp_dir, "dest")
@@ -511,3 +523,23 @@ class TestActionsReconcile:
         actions = Actions(m, mock_args)
 
         assert actions.reconcile() == 0
+
+
+class TestInspectJson:
+    """inspect --format json emits a versioned, machine-readable document."""
+
+    def test_inspect_json(self, manifest_file, mock_args, capsys, temp_dir):
+        content = "$base\n~/.base: base\n$extended\n@include: base\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["extended"]
+        mock_args.format = "json"
+        actions = Actions(m, mock_args)
+
+        actions.inspect()
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["schema_version"] == 1
+        by_name = {section["name"]: section for section in payload["sections"]}
+        assert by_name["extended"]["includes"] == ["base"]
+        assert by_name["base"]["declarations"] == [{"dest": "~/.base", "src": "base"}]

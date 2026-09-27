@@ -18,9 +18,9 @@ rights.
 
 ## `toda`
 ```
-usage: toda [-h] [-n] [-m MANIFEST] [-f] [-v] [-d DIR] [--no-preflight]
-            [--format {text,json}] [--color {auto,always,never}]
-            [--only-changed]
+usage: toda [-h] [-n] [-m MANIFEST] [--version] [-f] [--strict] [-v] [-d DIR]
+            [--no-preflight] [--format {text,json}]
+            [--color {auto,always,never}] [--only-changed]
             [{install,purge,inspect,trace,reconcile,help}] [section ...]
 
 creates symlinks described by a manifest
@@ -32,10 +32,15 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  -n, --dry-run         nop out all syscalls, verbose
+  -n, --dry-run         print the plan for install/purge without touching the
+                        filesystem
   -m MANIFEST, --manifest MANIFEST
-                        path to custom manifest file
+                        path to custom manifest file (default: $TODA_MANIFEST,
+                        else the nearest MANIFEST walking up from the current
+                        directory)
+  --version             show program's version number and exit
   -f, --force           allow clobbering files in target paths
+  --strict              treat skipped install/purge entries as failures
   -v, --verbose
   -d DIR, --dir DIR     override HOME and USERPROFILE (tilde expansion)
   --no-preflight        skip the preflight sanity checks
@@ -51,6 +56,45 @@ actions:
   trace       show resolved link provenance (declaration source + include chain)
   reconcile   diff expected links vs filesystem state (exit 0 clean, 2 drift/conflict, 1 error)
   help        show this help message and exit
+
+flags by action:
+  install/purge    -n/--dry-run, -f/--force, --strict, --no-preflight
+  inspect          --format
+  trace            --format
+  reconcile        --format, --color, --only-changed, --no-preflight
+  all              -m/--manifest, -d/--dir, -v
+```
+
+## Manifest discovery
+
+`toda` locates the manifest in this order:
+
+1. the `-m`/`--manifest` flag
+2. the `TODA_MANIFEST` environment variable
+3. the nearest `MANIFEST` found walking up from the current directory
+
+That means you can run `toda reconcile default` anywhere inside a dotfiles
+repo and it will find the repo's manifest. If none is found, `./MANIFEST` is
+used and the error names the path.
+
+## Variables
+
+`${VAR}` in a destination or source is replaced with the value of the
+environment variable `VAR`. Only the braced form is expanded, and an unset
+variable is left as written:
+
+```
+${XDG_CONFIG_HOME}/git/config: gitconfig
+```
+
+## Windows paths
+
+A colon that follows a single drive letter (`C:\`, `c:/`) is part of the path,
+not the destination/source separator, so absolute Windows paths work in both
+positions:
+
+```
+~/note: C:\Users\me\notes.txt
 ```
 
 ## `MANIFEST` file syntax
@@ -117,6 +161,12 @@ toda reconcile --color never default
 - `0`: all links are `ok`
 - `2`: drift/conflicts detected
 - `1`: operational failure
+
+## JSON output
+
+`trace`, `reconcile` and `inspect --format json` emit a document with a
+`schema_version` field, currently `1`. Pin against it when consuming the
+output from other tools.
 
 ## CI Example
 

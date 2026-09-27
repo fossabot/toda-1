@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import logging
 import os
-from os.path import abspath, dirname, expanduser, join, normpath
+import re
+from os.path import abspath, dirname, exists, expanduser, join, normpath
 from typing import ClassVar, Iterable, Iterator, TextIO
 
 from .errors import ManifestError, SectionNotFound
@@ -11,6 +12,40 @@ from .errors import ManifestError, SectionNotFound
 log = logging.getLogger(__name__)
 
 Section = dict[str, "str | tuple[str, ...]"]
+
+MANIFEST_ENV_VAR = "TODA_MANIFEST"
+MANIFEST_FILENAME = "MANIFEST"
+
+# A `:` right after a single drive letter at the start of a path (`C:\`,
+# `C:/`) is part of the path, not the dest/src separator.
+_DRIVE_LETTER_COLON = re.compile(r"(?:^|(?<=\s))[A-Za-z]:[\\/]")
+
+# Only the braced form is expanded, so a literal `$` never collides with the
+# unrelated `$section` declaration syntax.
+_BRACED_ENV_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _expand_vars(value: str) -> str:
+    return _BRACED_ENV_VAR.sub(lambda m: os.environ.get(m.group(1), m.group(0)), value)
+
+
+def discover_manifest(startdir: str, explicit: str | None = None) -> str:
+    """Resolve the manifest path: an explicit flag, then $TODA_MANIFEST, then
+    the nearest MANIFEST found walking up from `startdir`."""
+    if explicit:
+        return explicit
+    from_env = os.environ.get(MANIFEST_ENV_VAR)
+    if from_env:
+        return from_env
+    current = abspath(startdir)
+    while True:
+        candidate = join(current, MANIFEST_FILENAME)
+        if exists(candidate):
+            return candidate
+        parent = dirname(current)
+        if parent == current:
+            return join(startdir, MANIFEST_FILENAME)
+        current = parent
 
 
 class IllegalSyntax(ManifestError):
@@ -62,7 +97,13 @@ class Manifest:
         self._declaration_metadata: dict[tuple[str, str], DeclarationMetadata] = {}
         if not self.path:
             return
-        with open(self.path, "r") as fp:
+        try:
+            fp = open(self.path, "r")
+        except OSError as e:
+            raise ManifestError(
+                "cannot read manifest `{:}`: {:}".format(self.path, e)
+            ) from None
+        with fp:
             self._parse(fp)
 
     def __contains__(self, section_name: object) -> bool:
@@ -80,8 +121,11 @@ class Manifest:
 
     @staticmethod
     def _parse_line_section_declaration(line: str) -> str | None:
-        has_prefix = line and len(line) and line[0] == "$"
+        has_prefix = bool(line) and line[0] == "$"
         if not has_prefix:
+            return None
+        if line.startswith("${"):
+            # `${VAR}/path: src` is a mapping, not a section declaration.
             return None
         if line[-1] in "@*:":
             raise IllegalSyntax(
@@ -113,6 +157,11 @@ class Manifest:
             if include not in includes:
                 includes.append(include)
         return tuple(includes)
+
+    @staticmethod
+    def _unprotected_colon_indices(line: str) -> list[int]:
+        protected = {m.start() + 1 for m in _DRIVE_LETTER_COLON.finditer(line)}
+        return [i for i, ch in enumerate(line) if ch == ":" and i not in protected]
 
     def _add_declaration_metadata(
         self, section_name: str, dest: str, line_number: int, raw_declaration: str
@@ -155,14 +204,14 @@ class Manifest:
                     "section declaration".format(i)
                 )
 
-            paths = line.split(":", 1)
-            if len(paths) != 2:
+            colon_indices = self._unprotected_colon_indices(line)
+            if not colon_indices:
                 raise IllegalSyntax("line {:d}: missing colon separator".format(i))
-            unparsed_separators = paths[-1].find(":") > -1
-            if unparsed_separators:
+            if len(colon_indices) > 1:
                 raise IllegalSyntax("line {:d}: multiple colons".format(i))
 
-            dest, src = (p.strip() for p in paths)
+            sep = colon_indices[0]
+            dest, src = line[:sep].strip(), line[sep + 1 :].strip()
             dest_is_macro = self._parse_part_macro(dest)
             src_is_macro = self._parse_part_macro(src)
 
@@ -208,7 +257,7 @@ class Manifest:
         include_chain: tuple[str, ...],
     ) -> list[ResolvedLink]:
         metadata = self.get_declaration_metadata(section_name, dest)
-        resolved_dest = normpath(expanduser(dest))
+        resolved_dest = normpath(expanduser(_expand_vars(dest)))
         assert isinstance(src, str)
         if src in self.SRC_MACROS:
             return [
@@ -224,7 +273,7 @@ class Manifest:
                 )
             ]
 
-        resolved_src = normpath(join(self._srcdir, expanduser(src)))
+        resolved_src = normpath(join(self._srcdir, expanduser(_expand_vars(src))))
         has_glob = self._parse_part_terminal_glob(resolved_src)
         if not has_glob:
             return [

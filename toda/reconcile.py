@@ -7,8 +7,8 @@ import sys
 from os.path import dirname, isdir, islink, join, lexists, normpath
 from typing import TextIO
 
+from . import SCHEMA_VERSION
 from .model import Manifest, ResolvedLink
-
 
 STATUS_OK = "ok"
 STATUS_MISSING = "missing"
@@ -200,13 +200,16 @@ def render_reconcile_text(
             line += " expected={0}".format(entry.expected_src)
         lines.append(line)
 
-    totals = " ".join("{0}={1}".format(status, result.totals[status]) for status in STATUSES)
+    totals = " ".join(
+        "{0}={1}".format(status, result.totals[status]) for status in STATUSES
+    )
     lines.append("totals {0}".format(totals))
     return "\n".join(lines)
 
 
 def result_to_dict(result: ReconcileResult) -> dict:
     return {
+        "schema_version": SCHEMA_VERSION,
         "entries": [
             {
                 "dest": entry.dest,

@@ -3,7 +3,12 @@
 import os
 import pytest
 from toda.errors import ManifestError, SectionNotFound
-from toda.model import Manifest, IllegalSyntax
+from toda.model import (
+    Manifest,
+    ManifestError,
+    discover_manifest,
+)
+from toda.model import IllegalSyntax
 
 
 class TestManifestInit:
@@ -400,3 +405,93 @@ class TestManifestSourceResolution:
             os.chdir(old_cwd)
 
         assert resolved_src == src
+
+
+class TestWindowsPaths:
+    """Colons inside Windows drive-letter paths are not separators."""
+
+    def test_drive_letter_dest_with_backslash(self, manifest_file, temp_dir):
+        path = manifest_file("$default\nC:\\x\\y: src\n")
+        m = Manifest(path=path, startdir=temp_dir)
+        assert "C:\\x\\y" in m["default"]
+
+    def test_drive_letter_dest_with_forward_slash(self, manifest_file, temp_dir):
+        path = manifest_file("$default\nC:/x/y: src\n")
+        m = Manifest(path=path, startdir=temp_dir)
+        assert "C:/x/y" in m["default"]
+
+    def test_drive_letter_src(self, manifest_file, temp_dir):
+        path = manifest_file("$default\n~/.config/app: C:\\repo\\app.conf\n")
+        m = Manifest(path=path, startdir=temp_dir)
+        assert m["default"]["~/.config/app"] == "C:\\repo\\app.conf"
+
+    def test_lowercase_drive_letter(self, manifest_file, temp_dir):
+        path = manifest_file("$default\nc:\\x: src\n")
+        m = Manifest(path=path, startdir=temp_dir)
+        assert "c:\\x" in m["default"]
+
+    def test_non_drive_colon_is_still_a_separator_error(self, manifest_file, temp_dir):
+        path = manifest_file("$default\n~/a: b: c\n")
+        with pytest.raises(IllegalSyntax, match="multiple colons"):
+            Manifest(path=path, startdir=temp_dir)
+
+
+class TestEnvVarExpansion:
+    """`${VAR}` is expanded in dest and src paths."""
+
+    def test_dest_expansion(self, manifest_file, temp_dir, monkeypatch):
+        monkeypatch.setenv("TODA_TEST_XDG", "/tmp/toda-xdg")
+        path = manifest_file("$default\n${TODA_TEST_XDG}/app.conf: src\n")
+        m = Manifest(path=path, startdir=temp_dir)
+        dest, _ = next(iter(m.iter_section("default")))
+        assert dest == os.path.normpath("/tmp/toda-xdg/app.conf")
+
+    def test_unset_var_is_left_literal(self, manifest_file, temp_dir, monkeypatch):
+        monkeypatch.delenv("TODA_TEST_UNSET", raising=False)
+        path = manifest_file("$default\n${TODA_TEST_UNSET}/app.conf: src\n")
+        m = Manifest(path=path, startdir=temp_dir)
+        dest, _ = next(iter(m.iter_section("default")))
+        assert "${TODA_TEST_UNSET}" in dest
+
+    def test_unbraced_dollar_is_untouched(self, manifest_file, temp_dir):
+        path = manifest_file("$default\n~/.app: $HOME_LITERAL/app.conf\n")
+        m = Manifest(path=path, startdir=temp_dir)
+        _, src = next(iter(m.iter_section("default")))
+        assert "$HOME_LITERAL" in src
+
+    def test_env_var_dest_is_not_a_section_declaration(self, manifest_file, temp_dir):
+        path = manifest_file("$default\n${TODA_X}/app.conf: src\n")
+        m = Manifest(path=path, startdir=temp_dir)
+        assert list(m.keys()) == ["default"]
+
+
+class TestDiscoverManifest:
+    """Locating the manifest: flag, env var, then walking up."""
+
+    def test_explicit_path_wins(self, temp_dir, monkeypatch):
+        monkeypatch.setenv("TODA_MANIFEST", os.path.join(temp_dir, "env"))
+        assert discover_manifest(temp_dir, "/flag/MANIFEST") == "/flag/MANIFEST"
+
+    def test_env_var_used_when_no_flag(self, temp_dir, monkeypatch):
+        monkeypatch.setenv("TODA_MANIFEST", "/env/MANIFEST")
+        assert discover_manifest(temp_dir) == "/env/MANIFEST"
+
+    def test_walks_up_to_a_parent(self, temp_dir, manifest_file, monkeypatch):
+        monkeypatch.delenv("TODA_MANIFEST", raising=False)
+        manifest_file("$default\n")
+        nested = os.path.join(temp_dir, "a", "b")
+        os.makedirs(nested)
+        assert discover_manifest(nested) == os.path.join(temp_dir, "MANIFEST")
+
+    def test_falls_back_to_startdir(self, temp_dir, monkeypatch):
+        monkeypatch.delenv("TODA_MANIFEST", raising=False)
+        monkeypatch.setattr("toda.model.exists", lambda path: False)
+        assert discover_manifest(temp_dir) == os.path.join(temp_dir, "MANIFEST")
+
+
+class TestUnreadableManifest:
+    """A manifest that cannot be opened is a clean error, not a traceback."""
+
+    def test_missing_file_raises(self, temp_dir):
+        with pytest.raises(ManifestError, match="cannot read manifest"):
+            Manifest(path=os.path.join(temp_dir, "does-not-exist"), startdir=temp_dir)

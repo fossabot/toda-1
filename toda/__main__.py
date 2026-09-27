@@ -2,12 +2,20 @@ import os
 import argparse
 import logging
 import sys
+from importlib.metadata import PackageNotFoundError, version
 
 from .errors import SectionNotFound, TodaError
-from .model import Manifest
+from .model import Manifest, discover_manifest
 from .controller import Actions
 
 log = logging.getLogger("toda")
+
+
+def _version() -> str:
+    try:
+        return version("toda")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def main() -> int | None:
@@ -19,8 +27,16 @@ def main() -> int | None:
   trace       show resolved link provenance (declaration source + include chain)
   reconcile   diff expected links vs filesystem state (exit 0 clean, 2 drift/conflict, 1 error)
   help        show this help message and exit
+
+flags by action:
+  install/purge    -n/--dry-run, -f/--force, --strict, --no-preflight
+  inspect          --format
+  trace            --format
+  reconcile        --format, --color, --only-changed, --no-preflight
+  all              -m/--manifest, -d/--dir, -v
 """
     parser = argparse.ArgumentParser(
+        prog="toda",
         description="creates symlinks described by a manifest",
         epilog=actions_help,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -43,8 +59,14 @@ def main() -> int | None:
         "-m",
         "--manifest",
         type=str,
-        help="path to custom manifest file",
-        default="./MANIFEST",
+        help="path to custom manifest file (default: $TODA_MANIFEST, else the"
+        " nearest MANIFEST walking up from the current directory)",
+        default=None,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="toda {:s}".format(_version()),
     )
     parser.add_argument(
         "-f",
@@ -115,7 +137,7 @@ def main() -> int | None:
         log.setLevel(logging.INFO)
 
     try:
-        m = Manifest(path=args.manifest, startdir=startdir)
+        m = Manifest(path=discover_manifest(startdir, args.manifest), startdir=startdir)
         if not args.section:
             args.section = ("default",)
         else:
