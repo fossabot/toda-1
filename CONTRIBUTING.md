@@ -91,9 +91,14 @@ Maintainers cut a release by tagging:
    ```
 
 The tag starts the release workflow, which builds the distributions, publishes
-to TestPyPI, then to PyPI over trusted publishing, and opens a GitHub release
-whose notes are the CHANGELOG section for that version. `setuptools_scm`
-derives the package version from the tag, so do not edit a version by hand.
+them to PyPI over trusted publishing, and opens a GitHub release whose notes
+are the CHANGELOG section for that version. `setuptools_scm` derives the
+package version from the tag, so do not edit a version by hand.
+
+PyPI will not accept a version twice, so the first release of a new version
+number should be a release candidate, such as `v0.2.0rc1`. If anything goes
+wrong, that version is expendable and you move to `rc2`. A pre-release is not
+installed by default, so it is invisible to anyone running `pip install toda`.
 
 ## Reporting bugs
 
