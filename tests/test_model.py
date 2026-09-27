@@ -2,6 +2,7 @@
 
 import os
 import pytest
+from toda.errors import ManifestError, SectionNotFound
 from toda.model import Manifest, IllegalSyntax
 
 
@@ -229,7 +230,13 @@ class TestManifestParsing:
     def test_glob_without_directory_dest_raises(self, manifest_file, temp_dir):
         content = "$default\n~/.config: dotfiles/*\n"
         path = manifest_file(content)
-        with pytest.raises(AssertionError, match="glob dest must be directory"):
+        with pytest.raises(IllegalSyntax, match="glob dest must be directory"):
+            Manifest(path=path, startdir=temp_dir)
+
+    def test_empty_section_name_raises(self, manifest_file, temp_dir):
+        content = "$\n~/.test: source\n"
+        path = manifest_file(content)
+        with pytest.raises(IllegalSyntax, match="missing a name"):
             Manifest(path=path, startdir=temp_dir)
 
 
@@ -292,21 +299,21 @@ class TestManifestIterSection:
         content = "$circular\n@include: circular\n"
         path = manifest_file(content)
         m = Manifest(path=path, startdir=temp_dir)
-        with pytest.raises(AssertionError, match="include cycle detected"):
+        with pytest.raises(ManifestError, match="include cycle detected"):
             list(m.iter_section("circular"))
 
     def test_multi_section_include_cycle_raises(self, manifest_file, temp_dir):
         content = "$a\n@include: b\n$b\n@include: c\n$c\n@include: a\n"
         path = manifest_file(content)
         m = Manifest(path=path, startdir=temp_dir)
-        with pytest.raises(AssertionError, match="a -> b -> c -> a"):
+        with pytest.raises(ManifestError, match="a -> b -> c -> a"):
             list(m.iter_section("a"))
 
     def test_missing_include_dependency_raises(self, manifest_file, temp_dir):
         content = "$main\n@include: nonexistent\n"
         path = manifest_file(content)
         m = Manifest(path=path, startdir=temp_dir)
-        with pytest.raises(AssertionError, match="does not exist"):
+        with pytest.raises(SectionNotFound, match="does not exist"):
             list(m.iter_section("main"))
 
 
@@ -370,3 +377,26 @@ class TestManifestProvenance:
         entries = list(m.iter_section_provenance("default"))
         assert len(entries) == 2
         assert all(entry.glob_origin == "dotfiles/*" for entry in entries)
+
+
+class TestManifestSourceResolution:
+    """Relative sources resolve against the manifest's own directory."""
+
+    def test_relative_source_resolves_against_manifest_dir(
+        self, manifest_file, temp_dir, source_file
+    ):
+        src = source_file(content="content", filename="source.txt")
+        content = "$default\n~/.test: source.txt\n"
+        path = manifest_file(content)
+
+        other_dir = os.path.join(temp_dir, "elsewhere")
+        os.makedirs(other_dir)
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(other_dir)
+            m = Manifest(path=path)
+            dest, resolved_src = next(m.iter_section("default"))
+        finally:
+            os.chdir(old_cwd)
+
+        assert resolved_src == src

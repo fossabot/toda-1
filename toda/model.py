@@ -3,14 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import os
-from os.path import expanduser, join, normpath
+from os.path import abspath, dirname, expanduser, join, normpath
+
+from .errors import ManifestError, SectionNotFound
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.WARN)
-log.addHandler(logging.StreamHandler())
 
 
-class IllegalSyntax(Exception):
+class IllegalSyntax(ManifestError):
     pass
 
 
@@ -50,6 +50,7 @@ class Manifest(dict):
         if not self._startdir:
             self._startdir = os.getcwd()
         self._manifest_path = normpath(path) if path else "<memory>"
+        self._srcdir = dirname(abspath(path)) if path else self._startdir
         self._declaration_metadata = {}
         if not path:
             return
@@ -69,7 +70,10 @@ class Manifest(dict):
             raise IllegalSyntax(
                 "section name {:s} cannot end in {:s}".format(line[:-1], line[-1])
             )
-        return line.strip("$").strip()
+        name = line.strip("$").strip()
+        if not name:
+            raise IllegalSyntax("section declaration is missing a name")
+        return name
 
     @staticmethod
     def _parse_part_macro(part):
@@ -112,7 +116,10 @@ class Manifest(dict):
             if self._parse_line_comment(line):
                 continue
 
-            new_section = self._parse_line_section_declaration(line)
+            try:
+                new_section = self._parse_line_section_declaration(line)
+            except IllegalSyntax as e:
+                raise IllegalSyntax("line {:d}: {}".format(i, e)) from None
             if new_section:
                 if new_section in self:
                     raise IllegalSyntax(
@@ -156,9 +163,12 @@ class Manifest(dict):
 
             if not (dest_is_macro or src_is_macro):
                 has_glob = self._parse_part_terminal_glob(src)
-                assert has_glob ^ (
-                    not dest.endswith("/")
-                ), "line {:d}: glob dest must be directory ending with `/`".format(i)
+                if not has_glob ^ (not dest.endswith("/")):
+                    raise IllegalSyntax(
+                        "line {:d}: glob dest must be directory ending with `/`".format(
+                            i
+                        )
+                    )
 
             section[dest] = src
             self._add_declaration_metadata(
@@ -185,7 +195,7 @@ class Manifest(dict):
                 )
             ]
 
-        resolved_src = normpath(join(self._startdir, expanduser(src)))
+        resolved_src = normpath(join(self._srcdir, expanduser(src)))
         has_glob = self._parse_part_terminal_glob(resolved_src)
         if not has_glob:
             return [
@@ -229,7 +239,7 @@ class Manifest(dict):
     ):
         if section_name in active_stack:
             cycle = " -> ".join(active_stack + (section_name,))
-            raise AssertionError("include cycle detected: {:s}".format(cycle))
+            raise ManifestError("include cycle detected: {:s}".format(cycle))
 
         if from_include:
             if section_name in expanded_includes:
@@ -241,11 +251,11 @@ class Manifest(dict):
             if self._is_macro_or_parsed(dest):
                 if dest == self.INCLUDE_MACRO:
                     for include_name in src:
-                        assert include_name in self, (
-                            "cannot include `{:}` dependency `{:}` does not exist".format(
-                                section_name, include_name
+                        if include_name not in self:
+                            raise SectionNotFound(
+                                "cannot include `{:}` dependency `{:}` "
+                                "does not exist".format(section_name, include_name)
                             )
-                        )
                         for link in self._iter_section_provenance(
                             include_name,
                             include_chain + (include_name,),
@@ -255,14 +265,14 @@ class Manifest(dict):
                         ):
                             yield link
                     continue
-                assert False
+                raise ManifestError("unsupported macro `{:}`".format(dest))
 
             for link in self._resolve_link(section_name, dest, src, include_chain):
                 yield link
 
     def iter_section_provenance(self, section_name, included=None):
         if section_name not in self:
-            raise AssertionError(
+            raise SectionNotFound(
                 "section `{:s}` is not in the manifest".format(section_name)
             )
         if included is None:

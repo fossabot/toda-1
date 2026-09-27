@@ -3,6 +3,7 @@
 import json
 import os
 import pytest
+from toda.errors import SourceMissing
 from toda.model import Manifest
 from toda.controller import Actions, _deploy_one
 
@@ -87,22 +88,129 @@ class TestDeployOne:
         with open(dest, "w") as f:
             f.write("delete me")
 
-        assert _deploy_one(dest, "@delete", force=False) is True
+        assert _deploy_one(dest, "@delete", force=False) == "deleted"
         assert not os.path.lexists(dest)
 
     def test_delete_macro_missing_dest(self, temp_dir):
         """_deploy_one @delete is a no-op when dest is absent."""
         dest = os.path.join(temp_dir, "absent")
 
-        assert _deploy_one(dest, "@delete", force=False) is True
+        assert _deploy_one(dest, "@delete", force=False) == "deleted"
         assert not os.path.lexists(dest)
+
+    def test_delete_macro_symlink(self, temp_dir, source_file):
+        """_deploy_one @delete removes a symlink without following it."""
+        src = source_file()
+        dest = os.path.join(temp_dir, "link")
+        os.symlink(src, dest)
+
+        assert _deploy_one(dest, "@delete", force=False) == "deleted"
+        assert not os.path.lexists(dest)
+        assert os.path.exists(src)
+
+    def test_delete_macro_directory_fails(self, temp_dir):
+        """_deploy_one @delete refuses to remove a real directory."""
+        dest = os.path.join(temp_dir, "adir")
+        os.makedirs(dest)
+
+        assert _deploy_one(dest, "@delete", force=False) == "failed"
+        assert os.path.isdir(dest)
 
     def test_nonexistent_source_raises(self, temp_dir):
         """_deploy_one raises when source doesn't exist."""
         dest = os.path.join(temp_dir, "link")
 
-        with pytest.raises(AssertionError, match="does not exist"):
+        with pytest.raises(SourceMissing, match="does not exist"):
             _deploy_one(dest, "/nonexistent/source", force=False)
+
+    def test_source_checked_before_touching_dest(self, temp_dir):
+        """A missing source leaves an existing destination untouched."""
+        dest = os.path.join(temp_dir, "existing")
+        with open(dest, "w") as f:
+            f.write("original")
+
+        with pytest.raises(SourceMissing):
+            _deploy_one(dest, "/nonexistent/source", force=True)
+
+        with open(dest) as f:
+            assert f.read() == "original"
+
+    def test_noop_for_correct_existing_link(self, temp_dir, source_file):
+        """An existing symlink already pointing at the source is a no-op."""
+        src = source_file(content="content")
+        dest = os.path.join(temp_dir, "link")
+        os.symlink(src, dest)
+
+        result = _deploy_one(dest, src, force=False)
+
+        assert result == "noop"
+        assert os.readlink(dest) == src
+
+    def test_backup_on_force_for_regular_file(self, temp_dir, source_file):
+        """--force backs up an existing regular file instead of deleting it."""
+        src = source_file(content="new content")
+        dest = os.path.join(temp_dir, "existing")
+        with open(dest, "w") as f:
+            f.write("old content")
+
+        _deploy_one(dest, src, force=True)
+
+        assert os.path.islink(dest)
+        backup = dest + ".toda-backup"
+        assert os.path.exists(backup)
+        with open(backup) as f:
+            assert f.read() == "old content"
+
+    def test_backup_on_force_for_directory(self, temp_dir, source_file):
+        """--force backs up an existing directory instead of using rmtree."""
+        src = source_file(content="new content")
+        dest = os.path.join(temp_dir, "existingdir")
+        os.makedirs(dest)
+        with open(os.path.join(dest, "child.txt"), "w") as f:
+            f.write("child")
+
+        _deploy_one(dest, src, force=True)
+
+        assert os.path.islink(dest)
+        backup = dest + ".toda-backup"
+        assert os.path.isdir(backup)
+        assert os.path.exists(os.path.join(backup, "child.txt"))
+
+    def test_backup_timestamped_when_already_exists(self, temp_dir, source_file):
+        """A pre-existing backup path gets a timestamp suffix instead of clobbering."""
+        src = source_file(content="new content")
+        dest = os.path.join(temp_dir, "existing")
+        with open(dest, "w") as f:
+            f.write("old content")
+        with open(dest + ".toda-backup", "w") as f:
+            f.write("previous backup")
+
+        _deploy_one(dest, src, force=True)
+
+        assert os.path.islink(dest)
+        with open(dest + ".toda-backup") as f:
+            assert f.read() == "previous backup"
+        timestamped = [
+            name
+            for name in os.listdir(temp_dir)
+            if name.startswith("existing.toda-backup.")
+        ]
+        assert len(timestamped) == 1
+
+    def test_force_removes_wrong_target_symlink_without_backup(
+        self, temp_dir, source_file
+    ):
+        """--force removes (not backs up) a symlink pointing elsewhere."""
+        src1 = source_file(content="first", filename="first.txt")
+        src2 = source_file(content="second", filename="second.txt")
+        dest = os.path.join(temp_dir, "link")
+        os.symlink(src1, dest)
+
+        _deploy_one(dest, src2, force=True)
+
+        assert os.path.islink(dest)
+        assert os.readlink(dest) == src2
+        assert not os.path.exists(dest + ".toda-backup")
 
 
 class TestActionsInit:
@@ -177,6 +285,120 @@ class TestActionsInstall:
         assert os.path.islink(dest1)
         assert os.path.islink(dest2)
 
+    def test_install_returns_zero_on_success(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
+        src = source_file()
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "dest_link")
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        actions = Actions(m, mock_args)
+
+        assert actions.install() == 0
+
+    def test_install_returns_one_on_missing_source(
+        self, temp_dir, manifest_file, mock_args
+    ):
+        dest = os.path.join(temp_dir, "dest_link")
+        content = f"$default\n{dest}: missing.txt\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        actions = Actions(m, mock_args)
+
+        assert actions.install() == 1
+
+    def test_install_skip_is_not_a_failure_by_default(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
+        src = source_file()
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "existing")
+        with open(dest, "w") as f:
+            f.write("existing content")
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        actions = Actions(m, mock_args)
+
+        assert actions.install() == 0
+
+    def test_install_skip_is_a_failure_with_strict(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
+        src = source_file()
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "existing")
+        with open(dest, "w") as f:
+            f.write("existing content")
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        mock_args.strict = True
+        actions = Actions(m, mock_args)
+
+        assert actions.install() == 1
+
+    def test_install_verbose_shows_skip(
+        self, temp_dir, manifest_file, source_file, mock_args, caplog
+    ):
+        """A skip is only surfaced at -v (INFO), not at the default WARNING level."""
+        import logging
+
+        src = source_file()
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "existing")
+        with open(dest, "w") as f:
+            f.write("existing content")
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        actions = Actions(m, mock_args)
+
+        with caplog.at_level(logging.WARNING, logger="toda.controller"):
+            actions.install()
+        assert not any("skipped" in record.message for record in caplog.records)
+
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="toda.controller"):
+            actions.install()
+        assert any("skipped" in record.message for record in caplog.records)
+
+    def test_install_directory_symlink(
+        self, temp_dir, manifest_file, source_dir, mock_args
+    ):
+        """A directory source is linked with target_is_directory semantics."""
+        srcdir = source_dir()
+        dest = os.path.join(temp_dir, "dest_dir_link")
+        content = f"$default\n{dest}: {os.path.basename(srcdir)}\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        actions = Actions(m, mock_args)
+        actions.install()
+
+        assert os.path.islink(dest)
+        assert os.path.isdir(dest)
+        assert sorted(os.listdir(dest)) == ["file1.txt", "file2.txt"]
+
 
 class TestActionsPurge:
     """Test Actions.purge method."""
@@ -201,9 +423,10 @@ class TestActionsPurge:
         assert not os.path.exists(dest)
         assert not os.path.lexists(dest)
 
-    def test_purge_removes_regular_files(
+    def test_purge_leaves_regular_files_alone(
         self, temp_dir, manifest_file, source_file, mock_args
     ):
+        """Purge never removes a path toda didn't create as a symlink."""
         src = source_file()
         src_basename = os.path.basename(src)
         dest = os.path.join(temp_dir, "to_purge")
@@ -216,10 +439,56 @@ class TestActionsPurge:
 
         m = Manifest(path=path, startdir=temp_dir)
         mock_args.section = ["default"]
+        mock_args.force = False
+        actions = Actions(m, mock_args)
+        actions.purge()
+
+        assert os.path.exists(dest)
+        with open(dest) as f:
+            assert f.read() == "content"
+
+    def test_purge_leaves_wrong_target_symlink_alone_without_force(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
+        """Purge skips a symlink that points somewhere else, unless --force."""
+        src = source_file(filename="expected.txt")
+        other = source_file(content="other", filename="other.txt")
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "to_purge")
+        os.symlink(other, dest)
+
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        actions = Actions(m, mock_args)
+        actions.purge()
+
+        assert os.path.islink(dest)
+        assert os.readlink(dest) == other
+
+    def test_purge_backs_up_regular_file_with_force(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
+        src = source_file()
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "to_purge")
+        with open(dest, "w") as f:
+            f.write("content")
+
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = True
         actions = Actions(m, mock_args)
         actions.purge()
 
         assert not os.path.exists(dest)
+        assert os.path.exists(dest + ".toda-backup")
 
     def test_purge_handles_nonexistent(
         self, temp_dir, manifest_file, source_file, mock_args
@@ -237,6 +506,57 @@ class TestActionsPurge:
         actions = Actions(m, mock_args)
         # Should not raise
         actions.purge()
+
+    def test_purge_returns_zero_on_success(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
+        src = source_file()
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "to_purge")
+        os.symlink(src, dest)
+
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        actions = Actions(m, mock_args)
+
+        assert actions.purge() == 0
+
+    def test_purge_skip_is_a_failure_with_strict(
+        self, temp_dir, manifest_file, source_file, mock_args
+    ):
+        src = source_file()
+        src_basename = os.path.basename(src)
+        dest = os.path.join(temp_dir, "to_purge")
+        with open(dest, "w") as f:
+            f.write("content")
+
+        content = f"$default\n{dest}: {src_basename}\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        mock_args.force = False
+        mock_args.strict = True
+        actions = Actions(m, mock_args)
+
+        assert actions.purge() == 1
+
+    def test_purge_skips_delete_macro_entries(
+        self, temp_dir, manifest_file, mock_args
+    ):
+        dest = os.path.join(temp_dir, "gone")
+        with open(dest, "w") as f:
+            f.write("keep me")
+        content = f"$default\n{dest}: @delete\n"
+        path = manifest_file(content)
+        m = Manifest(path=path, startdir=temp_dir)
+        mock_args.section = ["default"]
+        actions = Actions(m, mock_args)
+
+        assert actions.purge() == 0
+        assert os.path.exists(dest)
 
 
 class TestActionsInspect:

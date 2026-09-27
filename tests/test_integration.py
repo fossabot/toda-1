@@ -2,6 +2,7 @@
 
 import os
 import pytest
+from toda.errors import ManifestError
 from toda.model import Manifest
 from toda.controller import Actions
 
@@ -186,7 +187,7 @@ class TestIntegrationErrorHandling:
     """Integration tests for error scenarios."""
 
     def test_missing_source_file(self, temp_dir, manifest_file, mock_args):
-        """Missing source file raises appropriate error."""
+        """Missing source file is logged and fails the install, without raising."""
         dest = os.path.join(temp_dir, "link")
         content = f"$default\n{dest}: nonexistent.txt\n"
         path = manifest_file(content)
@@ -196,8 +197,8 @@ class TestIntegrationErrorHandling:
         mock_args.force = False
         actions = Actions(m, mock_args)
 
-        with pytest.raises(AssertionError, match="does not exist"):
-            actions.install()
+        assert actions.install() == 1
+        assert not os.path.lexists(dest)
 
     def test_circular_include_detection(self, temp_dir, manifest_file, mock_args):
         """Circular includes are detected and raise error."""
@@ -208,7 +209,7 @@ class TestIntegrationErrorHandling:
         mock_args.section = ["a"]
         actions = Actions(m, mock_args)
 
-        with pytest.raises(AssertionError, match="include cycle detected"):
+        with pytest.raises(ManifestError, match="include cycle detected"):
             actions.install()
 
 

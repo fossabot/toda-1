@@ -3,13 +3,12 @@ import argparse
 import logging
 import sys
 
+from .errors import SectionNotFound, TodaError
 from .model import Manifest
 from .controller import Actions
 import toda.controller as controller
 
-log = logging.getLogger(__name__)
-log.setLevel(logging.WARN)
-log.addHandler(logging.StreamHandler())
+log = logging.getLogger("toda")
 
 
 def main():
@@ -50,6 +49,11 @@ def main():
         "--force",
         action="store_true",
         help="allow clobbering files in target paths",
+    )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="treat skipped install/purge entries as failures",
     )
     parser.add_argument("-v", "--verbose", default=0, action="count")
     parser.add_argument(
@@ -94,16 +98,20 @@ def main():
         parser.print_help()
         return 0
 
+    if not log.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        log.addHandler(handler)
+    log.setLevel(logging.WARNING)
+
     if args.dry_run:
         from .nop import nop
 
         args.verbose = 3
         log.warning("setting up dry run")
-        controller.rmtree = nop(controller.rmtree)
         controller.remove = nop(controller.remove)
         controller.makedirs = nop(controller.makedirs)
         controller.symlink = nop(controller.symlink)
-        controller.chdir = nop(controller.chdir)
 
     if args.dir:
         os.environ["HOME"] = os.environ["USERPROFILE"] = args.dir
@@ -113,15 +121,23 @@ def main():
     elif args.verbose >= 1:
         log.setLevel(logging.INFO)
 
-    m = Manifest(path=args.manifest, startdir=startdir)
-    if not args.section:
-        args.section = ("default",)
-    else:
-        args.section = list(map(lambda sn: sn.rstrip("/"), args.section))
-        for sn in args.section:
-            assert sn in m, "section `{:s}` is not in the manifest".format(sn)
+    try:
+        m = Manifest(path=args.manifest, startdir=startdir)
+        if not args.section:
+            args.section = ("default",)
+        else:
+            args.section = list(map(lambda sn: sn.rstrip("/"), args.section))
+            for sn in args.section:
+                if sn not in m:
+                    raise SectionNotFound(
+                        "section `{:s}` is not in the manifest".format(sn)
+                    )
 
-    exit_code = getattr(Actions(m, args), args.action)()
+        exit_code = getattr(Actions(m, args), args.action)()
+    except TodaError as e:
+        print("toda: error: {:}".format(e), file=sys.stderr)
+        return 1
+
     if isinstance(exit_code, int):
         raise SystemExit(exit_code)
 

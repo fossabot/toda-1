@@ -69,6 +69,7 @@ def mock_args():
             self.dry_run = False
             self.manifest = "./MANIFEST"
             self.force = False
+            self.strict = False
             self.verbose = 0
             self.dir = None
             self.no_preflight = True  # Skip preflight in tests
