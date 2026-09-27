@@ -384,7 +384,9 @@ class TestManifestProvenance:
 
         entries = list(m.iter_section_provenance("default"))
         assert len(entries) == 2
-        assert all(entry.glob_origin == "dotfiles/*" for entry in entries)
+        assert all(
+            entry.glob_origin == os.path.normpath("dotfiles/*") for entry in entries
+        )
 
 
 class TestManifestSourceResolution:

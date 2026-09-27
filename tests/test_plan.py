@@ -119,7 +119,7 @@ class TestApplyInstall:
         assert apply(build_plan(m, ["default"], "install")) == 0
 
         assert os.path.islink(dest)
-        assert os.readlink(dest) == src
+        assert os.path.samefile(dest, src)
 
     def test_source_missing_is_a_failure(self, temp_dir, manifest_file):
         dest = os.path.join(temp_dir, "link")
@@ -198,7 +198,7 @@ class TestApplyInstall:
 
         apply(build_plan(m, ["default"], "install", force=True))
 
-        assert os.readlink(dest) == src2
+        assert os.path.samefile(dest, src2)
         assert not os.path.exists(dest + ".toda-backup")
 
     def test_delete_macro_removes_file(self, temp_dir, manifest_file):

@@ -260,7 +260,7 @@ class TestActionsPurge:
         actions.purge()
 
         assert os.path.islink(dest)
-        assert os.readlink(dest) == other
+        assert os.path.samefile(dest, other)
 
     def test_purge_backs_up_regular_file_with_force(
         self, temp_dir, manifest_file, source_file, mock_args
