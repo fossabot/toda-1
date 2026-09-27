@@ -119,3 +119,26 @@ def test_version_and_help(tmp_path: Path) -> None:
     help_result = toda("--help", cwd=tmp_path)
     assert help_result.returncode == 0
     assert "reconcile" in help_result.stdout
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_example_repo_installs_reconciles_and_purges(tmp_path: Path) -> None:
+    """The repo's own examples/dotfiles works, exercising includes and a glob."""
+    manifest = REPO_ROOT / "examples" / "dotfiles" / "MANIFEST"
+    trial = tmp_path / "trial"
+    trial.mkdir()
+    args = ("-d", str(trial), "-m", str(manifest), "default")
+
+    install = toda("install", *args, cwd=tmp_path)
+    assert install.returncode == 0, install.stderr
+    assert (trial / ".vimrc").is_symlink()
+    assert (trial / ".config" / "gitconfig").is_symlink()
+
+    reconcile = toda("reconcile", "--color", "never", *args, cwd=tmp_path)
+    assert reconcile.returncode == 0, reconcile.stdout + reconcile.stderr
+
+    purge = toda("purge", *args, cwd=tmp_path)
+    assert purge.returncode == 0, purge.stderr
+    assert not (trial / ".vimrc").is_symlink()

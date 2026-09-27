@@ -1,0 +1,11 @@
+# A small dotfiles repo. See README.md before running install.
+$shell
+~/.vimrc: vimrc
+~/.config/: config/*
+
+# Files to remove on machines that used to have them.
+$cleanup
+~/.old_config: @delete
+
+$default
+@include: shell
