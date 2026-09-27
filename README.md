@@ -19,16 +19,18 @@ rights.
 ## `toda`
 ```
 usage: toda [-h] [-n] [-m MANIFEST] [-f] [-v] [-d DIR] [--no-preflight]
-            [--format {text,json}] [--color {auto,always,never}] [--only-changed]
-            [{install,purge,inspect,trace,reconcile}] [section [section ...]]
+            [--format {text,json}] [--color {auto,always,never}]
+            [--only-changed]
+            [{install,purge,inspect,trace,reconcile,help}] [section ...]
 
 creates symlinks described by a manifest
 
 positional arguments:
-  {install,purge,inspect,trace,reconcile}
+  {install,purge,inspect,trace,reconcile,help}
+                        action to run (default: inspect)
   section               manifest target
 
-optional arguments:
+options:
   -h, --help            show this help message and exit
   -n, --dry-run         nop out all syscalls, verbose
   -m MANIFEST, --manifest MANIFEST
@@ -41,6 +43,14 @@ optional arguments:
   --color {auto,always,never}
                         color mode for text output
   --only-changed        for reconcile text output, hide entries with status=ok
+
+actions:
+  install     create links from manifest sections
+  purge       remove destination paths defined by manifest sections
+  inspect     print section include relationships
+  trace       show resolved link provenance (declaration source + include chain)
+  reconcile   diff expected links vs filesystem state (exit 0 clean, 2 drift/conflict, 1 error)
+  help        show this help message and exit
 ```
 
 ## `MANIFEST` file syntax

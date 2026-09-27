@@ -87,9 +87,15 @@ class TestDeployOne:
         with open(dest, "w") as f:
             f.write("delete me")
 
-        result = _deploy_one(dest, "@delete", force=False)
+        assert _deploy_one(dest, "@delete", force=False) is True
+        assert not os.path.lexists(dest)
 
-        # After @delete, dest should not exist (if lexists was true)
+    def test_delete_macro_missing_dest(self, temp_dir):
+        """_deploy_one @delete is a no-op when dest is absent."""
+        dest = os.path.join(temp_dir, "absent")
+
+        assert _deploy_one(dest, "@delete", force=False) is True
+        assert not os.path.lexists(dest)
 
     def test_nonexistent_source_raises(self, temp_dir):
         """_deploy_one raises when source doesn't exist."""
@@ -280,11 +286,8 @@ class TestAssertSymlinkWorks:
             pass  # cwd was deleted by previous test
         try:
             os.chdir(temp_dir)
-            actions = Actions(m, mock_args)
-            # Test symlink should be cleaned up
-            nonce = "toda-preflight-symlink"
-            target = nonce + ".target"
-            assert not os.path.lexists(target)
+            Actions(m, mock_args)
+            assert os.listdir(temp_dir) == []
         finally:
             os.chdir(old_cwd)
 

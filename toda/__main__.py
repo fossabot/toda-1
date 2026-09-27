@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import os
 import argparse
 import logging
@@ -22,6 +20,7 @@ def main():
   inspect     print section include relationships
   trace       show resolved link provenance (declaration source + include chain)
   reconcile   diff expected links vs filesystem state (exit 0 clean, 2 drift/conflict, 1 error)
+  help        show this help message and exit
 """
     parser = argparse.ArgumentParser(
         description="creates symlinks described by a manifest",
@@ -30,7 +29,7 @@ def main():
     )
     parser.add_argument(
         "action",
-        choices=("install", "purge", "inspect", "trace", "reconcile"),
+        choices=("install", "purge", "inspect", "trace", "reconcile", "help"),
         nargs="?",
         type=str,
         default="inspect",
@@ -90,6 +89,10 @@ def main():
         args = parser.parse_intermixed_args()
     else:
         args = parser.parse_args()
+
+    if args.action == "help":
+        parser.print_help()
+        return 0
 
     if args.dry_run:
         from .nop import nop

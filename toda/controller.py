@@ -1,8 +1,9 @@
 import json
 import logging
 import sys
+import tempfile
 from os import chdir, makedirs, remove, symlink
-from os.path import basename, dirname, exists, isdir, islink, lexists
+from os.path import basename, dirname, exists, isdir, islink, join, lexists
 from pprint import pprint
 from shutil import rmtree
 
@@ -12,7 +13,6 @@ from .reconcile import (
     render_reconcile_json,
     render_reconcile_text,
 )
-
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.WARN)
@@ -24,6 +24,11 @@ def _deploy_one(dest, src, force):
     """
     :assumptions: manifest has already been parsed and validated.
     """
+
+    if src == Manifest.DELETE_MACRO:
+        if lexists(dest):
+            remove(dest)
+        return True
 
     destdir = dirname(dest)
     destname = basename(dest)
@@ -41,15 +46,6 @@ def _deploy_one(dest, src, force):
         makedirs(destdir, 0o755)
 
     chdir(destdir)
-    if src in Manifest.SRC_MACROS:
-        if src == Manifest.DELETE_MACRO:
-            if lexists(dest):
-                remove(dest)
-        else:
-            assert False
-            log.critical("{:s} is an invalid macro".format(src))
-            return False
-        return True
     assert exists(src), "Manifest src `{:}` does not exist on the filesystem".format(
         src
     )
@@ -160,12 +156,5 @@ class Actions:
     def _assert_symlink_works(self):
         if self.args.no_preflight:
             return True
-        nonce = "toda-preflight-symlink"
-        target = nonce + ".target"
-        try:
-            symlink(nonce, target)
-        except OSError:
-            raise
-        finally:
-            if lexists(target):
-                remove(target)
+        with tempfile.TemporaryDirectory(prefix="toda-preflight-") as tmp:
+            symlink(join(tmp, "target"), join(tmp, "link"))

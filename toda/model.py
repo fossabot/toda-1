@@ -5,8 +5,6 @@ import logging
 import os
 from os.path import expanduser, join, normpath
 
-from . import iteritems
-
 log = logging.getLogger(__name__)
 log.setLevel(logging.WARN)
 log.addHandler(logging.StreamHandler())
@@ -239,7 +237,7 @@ class Manifest(dict):
             expanded_includes.add(section_name)
 
         stack = active_stack + (section_name,)
-        for dest, src in iteritems(self[section_name]):
+        for dest, src in self[section_name].items():
             if self._is_macro_or_parsed(dest):
                 if dest == self.INCLUDE_MACRO:
                     for include_name in src:

@@ -319,3 +319,16 @@ class TestCLIArgumentParsing:
 
             with pytest.raises(AssertionError, match="not in the manifest"):
                 main()
+
+    def test_help_action_prints_help(self, capsys):
+        """'help' action prints full help without loading a manifest."""
+        from toda.__main__ import main
+
+        with patch("sys.argv", ["toda", "help"]):
+            with patch("toda.__main__.Manifest") as mock_manifest:
+                assert main() == 0
+                mock_manifest.assert_not_called()
+
+        out = capsys.readouterr().out
+        assert "usage: toda" in out
+        assert "reconcile" in out
