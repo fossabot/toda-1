@@ -332,6 +332,10 @@ class TestApplyInstall:
             os.chmod(parent, 0o700)
         assert not os.path.lexists(dest)
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="a directory's write bit does not govern unlinking on Windows",
+    )
     def test_delete_macro_in_unwritable_directory_without_force_fails(
         self, temp_dir, manifest_file
     ):
@@ -344,6 +348,37 @@ class TestApplyInstall:
             assert os.path.lexists(dest)
         finally:
             os.chmod(parent, 0o700)
+
+    @pytest.mark.skipif(
+        os.name != "nt", reason="only Windows blocks deleting a read-only file"
+    )
+    def test_delete_macro_readonly_file_without_force_fails(
+        self, temp_dir, manifest_file
+    ):
+        dest = os.path.join(temp_dir, "locked")
+        with open(dest, "w") as f:
+            f.write("locked")
+        os.chmod(dest, 0o400)
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        try:
+            assert apply(build_plan(m, ["default"], "install")) == 1
+            assert os.path.lexists(dest)
+        finally:
+            _restore_writable(dest)
+
+    @pytest.mark.skipif(
+        os.name != "nt", reason="only Windows blocks deleting a read-only file"
+    )
+    def test_delete_macro_readonly_file_with_force(self, temp_dir, manifest_file):
+        dest = os.path.join(temp_dir, "locked")
+        with open(dest, "w") as f:
+            f.write("locked")
+        os.chmod(dest, 0o400)
+        m = _manifest(manifest_file, temp_dir, f"$default\n{dest}: @delete\n")
+
+        assert apply(build_plan(m, ["default"], "install", force=True)) == 0
+        assert not os.path.lexists(dest)
 
     def test_delete_macro_unwritable_tree_with_force(self, temp_dir, manifest_file):
         dest = os.path.join(temp_dir, "adir")
