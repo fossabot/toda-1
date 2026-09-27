@@ -5,8 +5,9 @@ import json
 import os
 import sys
 from os.path import dirname, isdir, islink, join, lexists, normpath
+from typing import TextIO
 
-from .model import ResolvedLink
+from .model import Manifest, ResolvedLink
 
 
 STATUS_OK = "ok"
@@ -43,24 +44,26 @@ class ReconcileResult:
     totals: dict[str, int]
 
     @property
-    def has_drift(self):
+    def has_drift(self) -> bool:
         return any(entry.status != STATUS_OK for entry in self.entries)
 
 
-def _normalize_target(dest, target):
+def _normalize_target(dest: str, target: str) -> str:
     if os.path.isabs(target):
         return normpath(target)
     return normpath(join(dirname(dest), target))
 
 
-def _same_target(actual_target, expected_src):
+def _same_target(actual_target: str, expected_src: str) -> bool:
     if normpath(actual_target) == normpath(expected_src):
         return True
     return os.path.realpath(actual_target) == os.path.realpath(expected_src)
 
 
-def _collect_records(manifest, sections):
-    records_by_dest = {}
+def _collect_records(
+    manifest: Manifest, sections: list[str]
+) -> dict[str, list[ResolvedLink]]:
+    records_by_dest: dict[str, list[ResolvedLink]] = {}
     for section in sections:
         for record in manifest.iter_section_provenance(section):
             if record.src.startswith("@"):
@@ -69,12 +72,13 @@ def _collect_records(manifest, sections):
     return records_by_dest
 
 
-def _build_entry(dest, records):
-    unique_expected = []
+def _build_entry(dest: str, records: list[ResolvedLink]) -> ReconcileEntry:
+    unique_expected: list[str] = []
     for record in records:
         if record.src not in unique_expected:
             unique_expected.append(record.src)
 
+    actual_target: str | None
     if lexists(dest):
         if islink(dest):
             actual_kind = "symlink"
@@ -105,6 +109,7 @@ def _build_entry(dest, records):
     if actual_kind == "missing":
         status = STATUS_MISSING
     elif actual_kind == "symlink":
+        assert actual_target is not None
         if not _same_target(actual_target, expected_src):
             status = STATUS_WRONG_TARGET
     elif actual_kind == "directory":
@@ -123,7 +128,7 @@ def _build_entry(dest, records):
     )
 
 
-def reconcile_manifest(manifest, sections):
+def reconcile_manifest(manifest: Manifest, sections: list[str]) -> ReconcileResult:
     records_by_dest = _collect_records(manifest, sections)
     entries = tuple(
         _build_entry(dest, records) for dest, records in records_by_dest.items()
@@ -134,7 +139,7 @@ def reconcile_manifest(manifest, sections):
     return ReconcileResult(entries=entries, totals=totals)
 
 
-def _supports_color(mode, stream):
+def _supports_color(mode: str, stream: TextIO) -> bool:
     if mode == "always":
         return True
     if mode == "never":
@@ -142,13 +147,18 @@ def _supports_color(mode, stream):
     return stream.isatty()
 
 
-def _paint(text, color_code, enabled):
+def _paint(text: str, color_code: str, enabled: bool) -> str:
     if not enabled:
         return text
     return "\x1b[{0}m{1}\x1b[0m".format(color_code, text)
 
 
-def render_reconcile_text(result, color_mode="auto", only_changed=False, stream=None):
+def render_reconcile_text(
+    result: ReconcileResult,
+    color_mode: str = "auto",
+    only_changed: bool = False,
+    stream: TextIO | None = None,
+) -> str:
     stream = stream or sys.stdout
     colors_enabled = _supports_color(color_mode, stream)
     symbol_map = {
@@ -168,7 +178,7 @@ def render_reconcile_text(result, color_mode="auto", only_changed=False, stream=
         STATUS_MANIFEST_CONFLICT: "35",
     }
 
-    lines = []
+    lines: list[str] = []
     for entry in result.entries:
         if only_changed and entry.status == STATUS_OK:
             continue
@@ -195,7 +205,7 @@ def render_reconcile_text(result, color_mode="auto", only_changed=False, stream=
     return "\n".join(lines)
 
 
-def result_to_dict(result):
+def result_to_dict(result: ReconcileResult) -> dict:
     return {
         "entries": [
             {
@@ -226,5 +236,5 @@ def result_to_dict(result):
     }
 
 
-def render_reconcile_json(result):
+def render_reconcile_json(result: ReconcileResult) -> str:
     return json.dumps(result_to_dict(result), indent=2, sort_keys=True)

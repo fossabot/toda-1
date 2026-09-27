@@ -257,41 +257,28 @@ class TestCLIArgumentParsing:
                     assert os.environ["HOME"] == "/custom/home"
                     assert os.environ["USERPROFILE"] == "/custom/home"
 
-    def test_dry_run_sets_verbose(self, temp_dir):
-        """--dry-run sets verbose to 3."""
+    def test_dry_run_leaves_filesystem_untouched(self, temp_dir, capsys):
+        """--dry-run prints the plan and never creates the link."""
         from toda.__main__ import main
-        import toda.controller as controller
 
+        src = os.path.join(temp_dir, "source.txt")
+        with open(src, "w") as f:
+            f.write("content")
+        dest = os.path.join(temp_dir, "dest")
         manifest_path = os.path.join(temp_dir, "MANIFEST")
         with open(manifest_path, "w") as f:
-            f.write("$default\n")
+            f.write(f"$default\n{dest}: source.txt\n")
 
-        with patch("argparse.ArgumentParser.parse_intermixed_args") as mock_parse:
-            mock_args = MagicMock()
-            mock_args.action = "inspect"
-            mock_args.dry_run = True
-            mock_args.manifest = manifest_path
-            mock_args.force = False
-            mock_args.verbose = 0
-            mock_args.dir = None
-            mock_args.no_preflight = True
-            mock_args.section = []
-            mock_parse.return_value = mock_args
+        argv = ["toda", "--no-preflight", "-m", manifest_path, "-n", "install"]
+        with patch("sys.argv", argv):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 0
 
-            with patch("toda.__main__.Actions"):
-                # Store original functions
-                original_remove = controller.remove
-                original_makedirs = controller.makedirs
-                original_symlink = controller.symlink
-
-                try:
-                    main()
-                    assert mock_args.verbose == 3
-                finally:
-                    # Restore original functions
-                    controller.remove = original_remove
-                    controller.makedirs = original_makedirs
-                    controller.symlink = original_symlink
+        assert not os.path.lexists(dest)
+        out = capsys.readouterr().out
+        assert "would link" in out
+        assert dest in out
 
     def test_invalid_section_raises(self, temp_dir, capsys):
         """Invalid section name prints a clean one-line error and returns 1."""

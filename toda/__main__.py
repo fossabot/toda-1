@@ -6,12 +6,11 @@ import sys
 from .errors import SectionNotFound, TodaError
 from .model import Manifest
 from .controller import Actions
-import toda.controller as controller
 
 log = logging.getLogger("toda")
 
 
-def main():
+def main() -> int | None:
     startdir = os.getcwd()
     actions_help = """actions:
   install     create links from manifest sections
@@ -35,7 +34,10 @@ def main():
         help="action to run (default: inspect)",
     )
     parser.add_argument(
-        "-n", "--dry-run", action="store_true", help="nop out all syscalls, verbose"
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="print the plan for install/purge without touching the filesystem",
     )
     parser.add_argument(
         "-m",
@@ -104,15 +106,6 @@ def main():
         log.addHandler(handler)
     log.setLevel(logging.WARNING)
 
-    if args.dry_run:
-        from .nop import nop
-
-        args.verbose = 3
-        log.warning("setting up dry run")
-        controller.remove = nop(controller.remove)
-        controller.makedirs = nop(controller.makedirs)
-        controller.symlink = nop(controller.symlink)
-
     if args.dir:
         os.environ["HOME"] = os.environ["USERPROFILE"] = args.dir
 
@@ -140,6 +133,7 @@ def main():
 
     if isinstance(exit_code, int):
         raise SystemExit(exit_code)
+    return None
 
 
 if __name__ == "__main__":
